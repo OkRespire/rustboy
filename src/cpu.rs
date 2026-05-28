@@ -40,7 +40,7 @@ impl Cpu {
         let y = (op >> 3) & 0x07;
         let z = op & 0x07;
 
-        let p = y << 1;
+        let p = y >> 1;
         let q = y % 2;
 
         match x {
