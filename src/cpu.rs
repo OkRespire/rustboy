@@ -1,3 +1,5 @@
+use bitmatch::bitmatch;
+
 use crate::{memory::Memory, registers::Registers};
 
 enum Condition {
@@ -8,6 +10,25 @@ enum Condition {
     None,
 }
 
+#[allow(dead_code)]
+enum Register {
+    A,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+}
+
+#[allow(dead_code)]
+enum RegisterPair {
+    AF,
+    BC,
+    DE,
+    HL,
+    SP,
+}
 #[allow(dead_code)]
 pub struct Cpu {
     registers: Registers,
@@ -35,87 +56,73 @@ impl Cpu {
         op
     }
 
+    #[bitmatch]
     pub fn decode(&mut self, op: u8) {
-        let x = (op >> 6) & 0x03;
-        let y = (op >> 3) & 0x07;
-        let z = op & 0x07;
-
-        let p = y >> 1;
-        let q = y % 2;
-
-        match x {
-            0 => match y {
-                0 => match z {
-                    0 => {}
-                    1 => {}
-                    2 => todo!(),
-                    3 => todo!(),
-                    4 => todo!(),
-                    5 => todo!(),
-                    6 => todo!(),
-                    7 => todo!(),
-                    _ => unreachable!("fail"),
-                },
-                1 => match z {
-                    0 => {
-                        let high = self.fetch();
-                        let low = self.fetch();
-                        let nn: u16 = ((high as u16) << 8) | low as u16;
-                        self.sp = nn;
-                    }
-                    _ => todo!(),
-                },
-                2 => match z {
-                    0 => {
-                        self.fetch();
-                    }
-                    _ => todo!(),
-                },
-                3 => match z {
-                    0 => {
-                        let n = self.fetch() as i8;
-                        self.jr(Condition::None, n);
-                    }
-                    _ => todo!(),
-                },
-                4 => match z {
-                    0 => {
-                        let n = self.fetch() as i8;
-                        self.jr(Condition::NZ, n)
-                    }
-                    _ => todo!(),
-                },
-
-                5 => match z {
-                    0 => {
-                        let n = self.fetch() as i8;
-                        self.jr(Condition::Z, n)
-                    }
-                    _ => todo!(),
-                },
-
-                6 => match z {
-                    0 => {
-                        let n = self.fetch() as i8;
-                        self.jr(Condition::NC, n)
-                    }
-                    _ => todo!(),
-                },
-
-                7 => match z {
-                    0 => {
-                        let n = self.fetch() as i8;
-                        self.jr(Condition::C, n)
-                    }
-                    _ => todo!(),
-                },
-
-                _ => unreachable!("fail"),
+        #[bitmatch]
+        match op {
+            "00yyy000" => match y {
+                0 => {}
+                1 => {
+                    let low = self.fetch();
+                    let high = self.fetch();
+                    let nn: u16 = ((high as u16) << 8) | low as u16;
+                    self.memory.write(nn, (self.sp & 0xFF) as u8);
+                    self.memory.write(nn + 1, (self.sp >> 8) as u8);
+                }
+                2 => {
+                    self.fetch();
+                }
+                3 => {
+                    let n = self.fetch() as i8;
+                    self.jr(Condition::None, n);
+                }
+                4 => {
+                    let n = self.fetch() as i8;
+                    self.jr(Condition::NZ, n)
+                }
+                5 => {
+                    let n = self.fetch() as i8;
+                    self.jr(Condition::Z, n)
+                }
+                6 => {
+                    let n = self.fetch() as i8;
+                    self.jr(Condition::NC, n)
+                }
+                7 => {
+                    let n = self.fetch() as i8;
+                    self.jr(Condition::C, n)
+                }
+                _ => unreachable!(),
             },
-            1 => todo!(),
-            2 => todo!(),
-            3 => todo!(),
-            _ => unreachable!("opcode unusable"),
+            "00yyy001" => {
+                let q = y % 2;
+                let p = y >> 1;
+                match q {
+                    0 => {
+                        let low = self.fetch();
+                        let high = self.fetch();
+                        let nn: u16 = ((high as u16) << 8) | low as u16;
+
+                        match p {
+                            0 => self.registers.set_bc(nn),
+                            1 => self.registers.set_de(nn),
+                            2 => self.registers.set_hl(nn),
+                            3 => self.sp = nn,
+
+                            _ => unreachable!(),
+                        }
+                    }
+                    1 => match p {
+                        0 => self.add_hl(RegisterPair::BC),
+                        1 => self.add_hl(RegisterPair::DE),
+                        2 => self.add_hl(RegisterPair::HL),
+                        3 => self.add_hl(RegisterPair::SP),
+                        _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                }
+            }
+            _ => unimplemented!(),
         }
     }
 
@@ -129,6 +136,26 @@ impl Cpu {
         };
         if should_jump {
             self.pc = self.pc.wrapping_add_signed(n as i16);
+        }
+    }
+
+    fn add_hl(&mut self, r2: RegisterPair) {
+        let hl = self.registers.hl();
+        let r2_val = self.get_register_pair(r2);
+        let (new_value, did_overflow) = hl.overflowing_add(r2_val);
+        self.registers.f.subtract = false;
+        self.registers.f.carry = did_overflow;
+        self.registers.f.half_carry = (hl & 0xFFF) + (r2_val & 0xFFF) > 0xFFF;
+        self.registers.set_hl(new_value);
+    }
+
+    fn get_register_pair(&self, r: RegisterPair) -> u16 {
+        match r {
+            RegisterPair::AF => self.registers.af(),
+            RegisterPair::BC => self.registers.bc(),
+            RegisterPair::DE => self.registers.de(),
+            RegisterPair::HL => self.registers.hl(),
+            RegisterPair::SP => self.sp,
         }
     }
 }

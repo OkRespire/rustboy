@@ -6,6 +6,7 @@ const HALF_CARRY_FLAG_BYTE_POSITION: u8 = 5;
 const CARRY_FLAG_BYTE_POSITION: u8 = 4;
 
 #[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub struct FlagsRegister {
     pub zero: bool,
     pub subtract: bool,
@@ -62,5 +63,33 @@ impl Default for Registers {
             h: 0x01,
             l: 0x4D,
         }
+    }
+}
+
+impl Registers {
+    pub fn set_bc(&mut self, nn: u16) {
+        self.b = (nn >> 8) as u8;
+        self.c = (nn & 0xFF) as u8;
+    }
+    pub fn set_de(&mut self, nn: u16) {
+        self.d = (nn >> 8) as u8;
+        self.e = (nn & 0xFF) as u8;
+    }
+    pub fn set_hl(&mut self, nn: u16) {
+        self.h = (nn >> 8) as u8;
+        self.l = (nn & 0xFF) as u8;
+    }
+    pub fn af(&self) -> u16 {
+        (self.a as u16) << 8 | u8::from(self.f) as u16
+    }
+    pub fn bc(&self) -> u16 {
+        (self.b as u16) << 8 | self.c as u16
+    }
+
+    pub fn de(&self) -> u16 {
+        (self.d as u16) << 8 | self.e as u16
+    }
+    pub fn hl(&self) -> u16 {
+        (self.h as u16) << 8 | self.l as u16
     }
 }

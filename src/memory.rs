@@ -1,4 +1,3 @@
-use anyhow::Result;
 #[allow(dead_code)]
 pub struct Memory {
     rom: [u8; 16 * 1024],
@@ -46,7 +45,7 @@ impl Memory {
         }
     }
 
-    pub fn write(&mut self, addr: u16, val: u8) -> Result<()> {
+    pub fn write(&mut self, addr: u16, val: u8) {
         match addr {
             0x0000..=0x3FFF => {
                 self.rom[addr as usize] = val;
@@ -80,6 +79,5 @@ impl Memory {
             }
             _ => {}
         }
-        Ok(())
     }
 }
