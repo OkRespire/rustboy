@@ -2,10 +2,11 @@ mod cpu;
 mod memory;
 mod registers;
 
-#[allow(unused_variables)]
+#[allow(unused_variables, unused_mut)]
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     dbg!(args);
-    let cpu = cpu::Cpu::default();
+    let mut cpu = cpu::Cpu::default();
+
     println!("Hello, world!");
 }

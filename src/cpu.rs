@@ -2,6 +2,7 @@ use bitmatch::bitmatch;
 
 use crate::{memory::Memory, registers::Registers};
 
+#[allow(dead_code)]
 enum Condition {
     NZ,
     Z,
@@ -76,21 +77,9 @@ impl Cpu {
                     let n = self.fetch() as i8;
                     self.jr(Condition::None, n);
                 }
-                4 => {
+                4..=7 => {
                     let n = self.fetch() as i8;
-                    self.jr(Condition::NZ, n)
-                }
-                5 => {
-                    let n = self.fetch() as i8;
-                    self.jr(Condition::Z, n)
-                }
-                6 => {
-                    let n = self.fetch() as i8;
-                    self.jr(Condition::NC, n)
-                }
-                7 => {
-                    let n = self.fetch() as i8;
-                    self.jr(Condition::C, n)
+                    self.jr(cc(y), n);
                 }
                 _ => unreachable!(),
             },
@@ -113,10 +102,10 @@ impl Cpu {
                         }
                     }
                     1 => match p {
-                        0 => self.add_hl(RegisterPair::BC),
-                        1 => self.add_hl(RegisterPair::DE),
-                        2 => self.add_hl(RegisterPair::HL),
-                        3 => self.add_hl(RegisterPair::SP),
+                        0..=3 => {
+                            let rp = rp(p);
+                            self.add_hl(rp);
+                        }
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -157,5 +146,25 @@ impl Cpu {
             RegisterPair::HL => self.registers.hl(),
             RegisterPair::SP => self.sp,
         }
+    }
+}
+
+fn rp(p: u8) -> RegisterPair {
+    match p {
+        0 => RegisterPair::BC,
+        1 => RegisterPair::DE,
+        2 => RegisterPair::HL,
+        3 => RegisterPair::SP,
+        _ => unreachable!(),
+    }
+}
+
+fn cc(y: u8) -> Condition {
+    match y {
+        4 => Condition::NZ,
+        5 => Condition::Z,
+        6 => Condition::NC,
+        7 => Condition::C,
+        _ => unreachable!(),
     }
 }
