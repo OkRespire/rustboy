@@ -14,6 +14,26 @@ pub struct FlagsRegister {
     pub carry: bool,
 }
 
+#[allow(dead_code)]
+pub enum Register {
+    A,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+}
+
+#[allow(dead_code)]
+pub enum RegisterPair {
+    AF,
+    BC,
+    DE,
+    HL,
+    SP,
+}
+
 impl From<u8> for FlagsRegister {
     fn from(byte: u8) -> Self {
         let zero = ((byte >> ZERO_FLAG_BYTE_POSITION) & 0b1) != 0;
