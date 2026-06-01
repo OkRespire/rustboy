@@ -30,7 +30,6 @@ pub struct Cpu {
     registers: Registers,
     memory: Memory,
     pc: u16,
-    sp: u16,
 }
 
 impl Default for Cpu {
@@ -39,7 +38,6 @@ impl Default for Cpu {
             registers: Registers::default(),
             memory: Memory::default(),
             pc: 0x0100,
-            sp: 0xFFFE,
         }
     }
 }
@@ -62,8 +60,8 @@ impl Cpu {
                     let low = self.fetch();
                     let high = self.fetch();
                     let nn: u16 = ((high as u16) << 8) | low as u16;
-                    self.memory.write(nn, (self.sp & 0xFF) as u8);
-                    self.memory.write(nn + 1, (self.sp >> 8) as u8);
+                    self.memory.write(nn, (self.registers.sp & 0xFF) as u8);
+                    self.memory.write(nn + 1, (self.registers.sp >> 8) as u8);
                 }
                 2 => {
                     self.fetch();
@@ -88,12 +86,12 @@ impl Cpu {
                         let nn: u16 = ((high as u16) << 8) | low as u16;
 
                         match p {
-                            0..=3 => self.set_rp(rp(p), nn),
+                            0..=3 => self.registers.set_rp(rp(p), nn),
                             _ => unreachable!(),
                         }
                     }
                     1 => match p {
-                        0..=3 => self.add_hl(rp(p)),
+                        0..=3 => self.registers.add_hl(rp(p)),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -102,10 +100,10 @@ impl Cpu {
             "00yyy010" => {
                 let q = y % 2;
                 let p = y >> 1;
-                let addr = self.get_rp(rp(p));
+                let addr = self.registers.get_rp(&rp(p));
                 match p {
-                    2 => self.inc_rp(RegisterPair::HL),
-                    3 => self.dec_rp(RegisterPair::HL),
+                    2 => self.registers.inc_rp(RegisterPair::HL),
+                    3 => self.registers.dec_rp(RegisterPair::HL),
                     _ => {}
                 }
                 match q {
@@ -118,8 +116,8 @@ impl Cpu {
                 let q = y % 2;
                 let p = y >> 1;
                 match q {
-                    0 => self.inc_rp(rp(p)),
-                    1 => self.dec_rp(rp(p)),
+                    0 => self.registers.inc_rp(rp(p)),
+                    1 => self.registers.dec_rp(rp(p)),
                     _ => unreachable!(),
                 }
             }
@@ -130,7 +128,7 @@ impl Cpu {
                         let new_val = val.wrapping_add(1);
                         self.memory.write(self.registers.hl(), new_val);
                     } else {
-                        self.inc_r(r(y))
+                        self.registers.inc_r(r(y))
                     }
                 }
                 5 => {
@@ -139,7 +137,7 @@ impl Cpu {
                         let new_val = val.wrapping_sub(1);
                         self.memory.write(self.registers.hl(), new_val);
                     } else {
-                        self.dec_r(r(y))
+                        self.registers.dec_r(r(y))
                     }
                 }
                 6 => {
@@ -147,7 +145,7 @@ impl Cpu {
                     if y == 6 {
                         self.memory.write(self.registers.hl(), n);
                     } else {
-                        self.set_r(r(y), n)
+                        self.registers.set_r(r(y), n)
                     }
                 }
                 7 => {
@@ -159,16 +157,16 @@ impl Cpu {
         }
     }
 
-    fn acc_flags(&self, af: AccFlag) {
+    fn acc_flags(&mut self, af: AccFlag) {
         match af {
-            AccFlag::RLCA => todo!(),
-            AccFlag::RRCA => todo!(),
-            AccFlag::RLA => todo!(),
-            AccFlag::RRA => todo!(),
-            AccFlag::DAA => todo!(),
-            AccFlag::CPL => todo!(),
-            AccFlag::SCF => todo!(),
-            AccFlag::CCF => todo!(),
+            AccFlag::RLCA => self.registers.rotate_left(Register::A, false),
+            AccFlag::RRCA => self.registers.rotate_right(Register::A, false),
+            AccFlag::RLA => self.registers.rotate_left(Register::A, true),
+            AccFlag::RRA => self.registers.rotate_right(Register::A, true),
+            AccFlag::DAA => self.registers.daa(),
+            AccFlag::CPL => self.registers.cpl(),
+            AccFlag::SCF => self.registers.scf(),
+            AccFlag::CCF => self.registers.ccf(),
         }
     }
 
@@ -182,103 +180,6 @@ impl Cpu {
         };
         if should_jump {
             self.pc = self.pc.wrapping_add_signed(n as i16);
-        }
-    }
-
-    fn add_hl(&mut self, r2: RegisterPair) {
-        let hl = self.registers.hl();
-        let r2_val = self.get_rp(r2);
-        let (new_value, did_overflow) = hl.overflowing_add(r2_val);
-        self.registers.f.subtract = false;
-        self.registers.f.carry = did_overflow;
-        self.registers.f.half_carry = (hl & 0xFFF) + (r2_val & 0xFFF) > 0xFFF;
-        self.registers.set_hl(new_value);
-    }
-
-    fn set_rp(&mut self, rp: RegisterPair, nn: u16) {
-        match rp {
-            RegisterPair::BC => self.registers.set_bc(nn),
-            RegisterPair::DE => self.registers.set_de(nn),
-            RegisterPair::HL => self.registers.set_hl(nn),
-            RegisterPair::SP => self.sp = nn,
-            _ => unreachable!(),
-        }
-    }
-
-    fn inc_rp(&mut self, rp: RegisterPair) {
-        match rp {
-            RegisterPair::BC => self.registers.set_bc(self.registers.bc().wrapping_add(1)),
-            RegisterPair::DE => self.registers.set_de(self.registers.de().wrapping_add(1)),
-            RegisterPair::HL => self.registers.set_hl(self.registers.hl().wrapping_add(1)),
-            RegisterPair::SP => self.sp = self.sp.wrapping_add(1),
-            _ => unreachable!(),
-        }
-    }
-
-    fn dec_rp(&mut self, rp: RegisterPair) {
-        match rp {
-            RegisterPair::BC => self.registers.set_bc(self.registers.bc().wrapping_sub(1)),
-            RegisterPair::DE => self.registers.set_de(self.registers.de().wrapping_sub(1)),
-            RegisterPair::HL => self.registers.set_hl(self.registers.hl().wrapping_sub(1)),
-            RegisterPair::SP => self.sp = self.sp.wrapping_sub(1),
-            _ => unreachable!(),
-        }
-    }
-
-    fn get_rp(&self, rp: RegisterPair) -> u16 {
-        match rp {
-            RegisterPair::AF => self.registers.af(),
-            RegisterPair::BC => self.registers.bc(),
-            RegisterPair::DE => self.registers.de(),
-            RegisterPair::HL => self.registers.hl(),
-            RegisterPair::SP => self.sp,
-        }
-    }
-    fn set_r(&mut self, r: Register, val: u8) {
-        match r {
-            Register::A => self.registers.a = val,
-            Register::B => self.registers.b = val,
-            Register::C => self.registers.c = val,
-            Register::D => self.registers.d = val,
-            Register::E => self.registers.e = val,
-            Register::H => self.registers.h = val,
-            Register::L => self.registers.l = val,
-        }
-    }
-
-    fn inc_r(&mut self, r: Register) {
-        match r {
-            Register::A => self.registers.a = self.registers.a.wrapping_add(1),
-            Register::B => self.registers.b = self.registers.b.wrapping_add(1),
-            Register::C => self.registers.c = self.registers.c.wrapping_add(1),
-            Register::D => self.registers.d = self.registers.d.wrapping_add(1),
-            Register::E => self.registers.e = self.registers.e.wrapping_add(1),
-            Register::H => self.registers.h = self.registers.h.wrapping_add(1),
-            Register::L => self.registers.l = self.registers.l.wrapping_add(1),
-        }
-    }
-
-    fn dec_r(&mut self, r: Register) {
-        match r {
-            Register::A => self.registers.a = self.registers.a.wrapping_sub(1),
-            Register::B => self.registers.b = self.registers.b.wrapping_sub(1),
-            Register::C => self.registers.c = self.registers.c.wrapping_sub(1),
-            Register::D => self.registers.d = self.registers.d.wrapping_sub(1),
-            Register::E => self.registers.e = self.registers.e.wrapping_sub(1),
-            Register::H => self.registers.h = self.registers.h.wrapping_sub(1),
-            Register::L => self.registers.l = self.registers.l.wrapping_sub(1),
-        }
-    }
-
-    fn get_r(&self, r: Register) -> u8 {
-        match r {
-            Register::A => self.registers.a,
-            Register::B => self.registers.b,
-            Register::C => self.registers.c,
-            Register::D => self.registers.d,
-            Register::E => self.registers.e,
-            Register::H => self.registers.h,
-            Register::L => self.registers.l,
         }
     }
 }
