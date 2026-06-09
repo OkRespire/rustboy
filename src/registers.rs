@@ -202,6 +202,7 @@ impl Registers {
         self.set_hl(new_value);
     }
 
+
     pub fn set_rp(&mut self, rp: RegisterPair, nn: u16) {
         match rp {
             RegisterPair::BC => self.set_bc(nn),

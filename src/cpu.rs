@@ -30,6 +30,9 @@ pub struct Cpu {
     registers: Registers,
     memory: Memory,
     pc: u16,
+    halted: bool,
+    halt_bug: bool,
+    ime: bool,
 }
 
 impl Default for Cpu {
@@ -38,90 +41,110 @@ impl Default for Cpu {
             registers: Registers::default(),
             memory: Memory::default(),
             pc: 0x0100,
+            halted: false,
+            halt_bug: false,
+            ime: false,
         }
     }
 }
 
 #[allow(dead_code)]
 impl Cpu {
+    pub fn run(&mut self) {
+        if self.halted {
+            // interrupt handle
+        } else {
+            let op = self.fetch();
+            self.decode(op);
+        }
+    }
     pub fn fetch(&mut self) -> u8 {
         let op = self.memory.read(self.pc);
-        self.pc += 1;
+        self.pc = if self.halt_bug {
+            self.halt_bug = false;
+            self.pc
+        } else {
+            self.pc + 1
+        };
         op
+    }
+
+    fn fetch_u16(&mut self) -> u16 {
+        let low = self.fetch();
+        let high = self.fetch();
+        ((high as u16) << 8) | low as u16
     }
 
     #[bitmatch]
     pub fn decode(&mut self, op: u8) {
         #[bitmatch]
         match op {
-            "00yyy000" => match y {
-                0 => {}
-                1 => {
-                    let low = self.fetch();
-                    let high = self.fetch();
-                    let nn: u16 = ((high as u16) << 8) | low as u16;
-                    self.memory.write(nn, (self.registers.sp & 0xFF) as u8);
-                    self.memory.write(nn + 1, (self.registers.sp >> 8) as u8);
-                }
-                2 => {
-                    self.fetch();
-                }
-                3 => {
-                    let n = self.fetch() as i8;
-                    self.jr(Condition::None, n);
-                }
-                4..=7 => {
-                    let n = self.fetch() as i8;
-                    self.jr(cc(y), n);
-                }
-                _ => unreachable!(),
-            },
-            "00yyy001" => {
-                let q = y % 2;
-                let p = y >> 1;
-                match q {
-                    0 => {
-                        let low = self.fetch();
-                        let high = self.fetch();
-                        let nn: u16 = ((high as u16) << 8) | low as u16;
-
-                        match p {
-                            0..=3 => self.registers.set_rp(rp(p), nn),
-                            _ => unreachable!(),
-                        }
-                    }
-                    1 => match p {
-                        0..=3 => self.registers.add_hl(rp(p)),
-                        _ => unreachable!(),
-                    },
-                    _ => unreachable!(),
-                }
-            }
-            "00yyy010" => {
-                let q = y % 2;
-                let p = y >> 1;
-                let addr = self.registers.get_rp(&rp(p));
-                match p {
-                    2 => self.registers.inc_rp(RegisterPair::HL),
-                    3 => self.registers.dec_rp(RegisterPair::HL),
-                    _ => {}
-                }
-                match q {
-                    0 => self.memory.write(addr, self.registers.a),
-                    1 => self.registers.a = self.memory.read(addr),
-                    _ => unreachable!(),
-                }
-            }
-            "00yyy011" => {
-                let q = y % 2;
-                let p = y >> 1;
-                match q {
-                    0 => self.registers.inc_rp(rp(p)),
-                    1 => self.registers.dec_rp(rp(p)),
-                    _ => unreachable!(),
-                }
-            }
             "00yyyzzz" => match z {
+                0 => match y {
+                    0 => {}
+                    1 => {
+                        let nn: u16 = self.fetch_u16();
+                        self.ld_nn_sp(nn);
+                    }
+                    2 => {
+                        self.fetch();
+                    }
+                    3 => {
+                        let n = self.fetch() as i8;
+                        self.jr(Condition::None, n);
+                    }
+                    4..=7 => {
+                        let n = self.fetch() as i8;
+                        self.jr(cc(y), n);
+                    }
+                    _ => unreachable!(),
+                },
+
+                1 => {
+                    let q = y % 2;
+                    let p = y >> 1;
+                    match q {
+                        0 => {
+                            let nn: u16 = self.fetch_u16();
+                            match p {
+                                0..=3 => self.registers.set_rp(rp(p), nn),
+                                _ => unreachable!(),
+                            }
+                        }
+                        1 => match p {
+                            0..=3 => self.registers.add_hl(rp(p)),
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+
+                2 => {
+                    let q = y % 2;
+                    let p = y >> 1;
+                    let addr = self.registers.get_rp(&rp(p));
+                    match p {
+                        2 => self.registers.inc_rp(RegisterPair::HL),
+                        3 => self.registers.dec_rp(RegisterPair::HL),
+                        _ => {}
+                    }
+                    match q {
+                        0 => self.memory.write(addr, self.registers.a),
+                        1 => self.registers.a = self.memory.read(addr),
+                        _ => unreachable!(),
+                    }
+                }
+
+                3 => {
+                    let q = y % 2;
+                    let p = y >> 1;
+                    match q {
+                        0 => self.registers.inc_rp(rp(p)),
+                        1 => self.registers.dec_rp(rp(p)),
+                        _ => unreachable!(),
+                    }
+                }
+
                 4 => {
                     if y == 6 {
                         let val = self.memory.read(self.registers.hl());
@@ -131,6 +154,7 @@ impl Cpu {
                         self.registers.inc_r(r(y))
                     }
                 }
+
                 5 => {
                     if y == 6 {
                         let val = self.memory.read(self.registers.hl());
@@ -140,6 +164,7 @@ impl Cpu {
                         self.registers.dec_r(r(y))
                     }
                 }
+
                 6 => {
                     let n = self.fetch();
                     if y == 6 {
@@ -148,11 +173,21 @@ impl Cpu {
                         self.registers.set_r(r(y), n)
                     }
                 }
+
                 7 => {
                     self.acc_flags(af(y));
                 }
                 _ => unreachable!(),
             },
+            "01yyyzzz" => {
+                if y == 6 && z == 6 {
+                    self.halt();
+                } else {
+                    self.ld_r_r(r(y), r(z));
+                }
+            }
+            "10yyyzzz" => {}
+
             _ => unimplemented!(),
         }
     }
@@ -168,6 +203,95 @@ impl Cpu {
             AccFlag::SCF => self.registers.scf(),
             AccFlag::CCF => self.registers.ccf(),
         }
+    }
+
+    fn ld_nn_sp(&mut self, nn: u16) {
+        self.memory.write(nn, (self.registers.sp & 0xFF) as u8);
+        self.memory.write(nn + 1, (self.registers.sp >> 8) as u8);
+    }
+
+    fn ld_r_r(&mut self, r1: Register, r2: Register) {
+        let r2_val = self.registers.get_r(&r2);
+        self.registers.set_r(r1, r2_val);
+    }
+
+    fn halt(&mut self) {
+        let pending = self.memory.read(0xFFFF) & self.memory.read(0xFF0F) != 0;
+        if self.ime {
+            self.halted = true;
+        } else if !pending {
+            self.halted = true;
+        } else {
+            self.halt_bug = true;
+        }
+    }
+
+    fn add_a_r(&mut self, r: Register) {
+        let old_a = self.registers.a;
+        let val = self.registers.get_r(&r);
+        let (res, carry) = self.registers.a.overflowing_add(val);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (val & 0xF) + (old_a & 0xF) > 0xF;
+    }
+
+    fn add_a_n(&mut self, n: u8) {
+        let old_a = self.registers.a;
+        let (res, carry) = self.registers.a.overflowing_add(n);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (n & 0xF) + (old_a & 0xF) > 0xF;
+    }
+    fn add_a_hl(&mut self) {
+        let old_a = self.registers.a;
+        let val = self.memory.read(self.registers.hl());
+        let (res, carry) = self.registers.a.overflowing_add(val);
+
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (res & 0xF) + (old_a & 0xF) > 0xF;
+    }
+
+    fn adc_a_r(&mut self, r: Register) {
+        let old_a = self.registers.a;
+        let val = self.registers.get_r(&r);
+        let carry_in = self.registers.f.carry as u8;
+        let (no_carry_res, carry1) = self.registers.a.overflowing_add(val);
+        let (res, carry2) = no_carry_res.overflowing_add(carry_in);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry1 || carry2;
+        self.registers.f.half_carry = (old_a & 0xF) + (val & 0xF) + carry_in > 0xF;
+    }
+
+    fn adc_a_n(&mut self, n: u8) {
+        let old_a = self.registers.a;
+        let carry_in = self.registers.f.carry as u8;
+        let (no_carry_res, carry1) = self.registers.a.overflowing_add(n);
+        let (res, carry2) = no_carry_res.overflowing_add(carry_in);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry1 || carry2;
+        self.registers.f.half_carry = (n & 0xF) + (old_a & 0xF) + carry_in > 0xF;
+    }
+    fn adc_a_hl(&mut self) {
+        let old_a = self.registers.a;
+        let carry_in = self.registers.f.carry as u8;
+        let val = self.memory.read(self.registers.hl());
+        let (no_carry_res, carry1) = self.registers.a.overflowing_add(val);
+        let (res, carry2) = no_carry_res.overflowing_add(carry_in);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry1 || carry2;
+        self.registers.f.half_carry = (val & 0xF) + (old_a & 0xF) + carry_in > 0xF;
     }
 
     fn jr(&mut self, cc: Condition, n: i8) {
