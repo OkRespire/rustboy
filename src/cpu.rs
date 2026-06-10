@@ -26,6 +26,18 @@ enum AccFlag {
 }
 
 #[allow(dead_code)]
+enum Alu {
+    ADD,
+    ADC,
+    SUB,
+    SBC,
+    AND,
+    XOR,
+    OR,
+    CP,
+}
+
+#[allow(dead_code)]
 pub struct Cpu {
     registers: Registers,
     memory: Memory,
@@ -186,7 +198,7 @@ impl Cpu {
                     self.ld_r_r(r(y), r(z));
                 }
             }
-            "10yyyzzz" => {}
+            "10yyyzzz" => self.alu_op_r(alu(y), r(z)),
 
             _ => unimplemented!(),
         }
@@ -202,6 +214,19 @@ impl Cpu {
             AccFlag::CPL => self.registers.cpl(),
             AccFlag::SCF => self.registers.scf(),
             AccFlag::CCF => self.registers.ccf(),
+        }
+    }
+
+    fn alu_op_r(&mut self, alu: Alu, r: Register) {
+        match alu {
+            Alu::ADD => self.add_a_r(r),
+            Alu::ADC => self.adc_a_r(r),
+            Alu::SUB => self.sub_r(r),
+            Alu::SBC => self.sbc_r(r),
+            Alu::AND => self.and_r(r),
+            Alu::XOR => self.xor_r(r),
+            Alu::OR => self.or_r(r),
+            Alu::CP => self.cp_r(r),
         }
     }
 
@@ -294,6 +319,168 @@ impl Cpu {
         self.registers.f.half_carry = (val & 0xF) + (old_a & 0xF) + carry_in > 0xF;
     }
 
+    fn sub_r(&mut self, r: Register) {
+        let old_a = self.registers.a;
+        let val = self.registers.get_r(&r);
+        let (res, carry) = self.registers.a.overflowing_sub(val);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (old_a & 0xF) < (val & 0xF);
+    }
+    fn sub_n(&mut self, n: u8) {
+        let old_a = self.registers.a;
+        let (res, carry) = self.registers.a.overflowing_sub(n);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (old_a & 0xF) < (n & 0xF);
+    }
+    fn sub_hl(&mut self) {
+        let old_a = self.registers.a;
+        let val = self.memory.read(self.registers.hl());
+        let (res, carry) = self.registers.a.overflowing_sub(val);
+        self.registers.a = res;
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (old_a & 0xF) < (val & 0xF);
+    }
+
+    fn sbc_r(&mut self, r: Register) {
+        let old_a = self.registers.a;
+        let carry_in = self.registers.f.carry as u8;
+        let val = self.registers.get_r(&r);
+        let (res1, carry1) = self.registers.a.overflowing_sub(val);
+        let (res2, carry2) = res1.overflowing_sub(carry_in);
+        self.registers.a = res2;
+        self.registers.f.zero = res2 == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry1 || carry2;
+        self.registers.f.half_carry = (old_a & 0xF) < (val & 0xF) + carry_in;
+    }
+    fn sbc_n(&mut self, n: u8) {
+        let old_a = self.registers.a;
+        let carry_in = self.registers.f.carry as u8;
+        let (res1, carry1) = self.registers.a.overflowing_sub(n);
+        let (res2, carry2) = res1.overflowing_sub(carry_in);
+        self.registers.a = res2;
+        self.registers.f.zero = res2 == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry1 || carry2;
+        self.registers.f.half_carry = (old_a & 0xF) < (n & 0xF) + carry_in;
+    }
+    fn sbc_hl(&mut self) {
+        let old_a = self.registers.a;
+        let carry_in = self.registers.f.carry as u8;
+        let val = self.memory.read(self.registers.hl());
+        let (res1, carry1) = self.registers.a.overflowing_sub(val);
+        let (res2, carry2) = res1.overflowing_sub(carry_in);
+        self.registers.a = res2;
+        self.registers.f.zero = res2 == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry1 || carry2;
+        self.registers.f.half_carry = (old_a & 0xF) < (val & 0xF) + carry_in;
+    }
+
+    fn and_r(&mut self, r: Register) {
+        let val = self.registers.get_r(&r);
+        self.registers.a = val & self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = true;
+    }
+    fn and_n(&mut self, n: u8) {
+        self.registers.a = n & self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = true;
+    }
+    fn and_hl(&mut self) {
+        let val = self.memory.read(self.registers.hl());
+        self.registers.a = val & self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = true;
+    }
+
+    fn xor_r(&mut self, r: Register) {
+        let val = self.registers.get_r(&r);
+        self.registers.a = val ^ self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = false;
+    }
+    fn xor_n(&mut self, n: u8) {
+        self.registers.a = n ^ self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = false;
+    }
+    fn xor_hl(&mut self) {
+        let val = self.memory.read(self.registers.hl());
+        self.registers.a = val ^ self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = false;
+    }
+
+    fn or_r(&mut self, r: Register) {
+        let val = self.registers.get_r(&r);
+        self.registers.a = val | self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = false;
+    }
+    fn or_n(&mut self, n: u8) {
+        self.registers.a = n | self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = false;
+    }
+    fn or_hl(&mut self) {
+        let val = self.memory.read(self.registers.hl());
+        self.registers.a = val | self.registers.a;
+        self.registers.f.zero = self.registers.a == 0;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = false;
+        self.registers.f.half_carry = false;
+    }
+
+    fn cp_r(&mut self, r: Register) {
+        let val = self.registers.get_r(&r);
+        let (res, carry) = self.registers.a.overflowing_sub(val);
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (self.registers.a & 0xF) < (val & 0xF);
+    }
+    fn cp_n(&mut self, n: u8) {
+        let (res, carry) = self.registers.a.overflowing_sub(n);
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (self.registers.a & 0xF) < (n & 0xF);
+    }
+    fn cp_hl(&mut self) {
+        let val = self.memory.read(self.registers.hl());
+        let (res, carry) = self.registers.a.overflowing_sub(val);
+        self.registers.f.zero = res == 0;
+        self.registers.f.subtract = true;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (self.registers.a & 0xF) < (val & 0xF);
+    }
+
     fn jr(&mut self, cc: Condition, n: i8) {
         let should_jump = match cc {
             Condition::NZ => !self.registers.f.zero,
@@ -351,6 +538,20 @@ fn af(y: u8) -> AccFlag {
         5 => AccFlag::CPL,
         6 => AccFlag::SCF,
         7 => AccFlag::CCF,
+        _ => unreachable!(),
+    }
+}
+
+fn alu(y: u8) -> Alu {
+    match y {
+        0 => Alu::ADD,
+        1 => Alu::ADC,
+        2 => Alu::SUB,
+        3 => Alu::SBC,
+        4 => Alu::AND,
+        5 => Alu::XOR,
+        6 => Alu::OR,
+        7 => Alu::XOR,
         _ => unreachable!(),
     }
 }
