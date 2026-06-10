@@ -87,6 +87,14 @@ impl Cpu {
         ((high as u16) << 8) | low as u16
     }
 
+    fn pop(&mut self) -> u16 {
+        let low = self.memory.read(self.registers.sp);
+        self.registers.sp += 1;
+        let high = self.memory.read(self.registers.sp);
+        self.registers.sp += 1;
+        ((high as u16) << 8) | low as u16
+    }
+
     #[bitmatch]
     pub fn decode(&mut self, op: u8) {
         #[bitmatch]
@@ -199,8 +207,39 @@ impl Cpu {
                 }
             }
             "10yyyzzz" => self.alu_op_r(alu(y), r(z)),
+            "11yyyzzz" => match z {
+                0 => match y {
+                    0..=3 => {
+                        self.ret(cc(y));
+                    }
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            },
 
             _ => unimplemented!(),
+        }
+    }
+    fn cc_match(&self, cc: Condition) -> bool {
+        match cc {
+            Condition::NZ => !self.registers.f.zero,
+            Condition::Z => self.registers.f.zero,
+            Condition::NC => !self.registers.f.carry,
+            Condition::C => self.registers.f.carry,
+            Condition::None => true,
+        }
+    }
+    fn jr(&mut self, cc: Condition, n: i8) {
+        let should_jump = self.cc_match(cc);
+        if should_jump {
+            self.pc = self.pc.wrapping_add_signed(n as i16);
+        }
+    }
+
+    fn ret(&mut self, cc: Condition) {
+        let should_ret = self.cc_match(cc);
+        if should_ret {
+            self.pc = self.pop();
         }
     }
 
@@ -219,6 +258,31 @@ impl Cpu {
 
     fn alu_op_r(&mut self, alu: Alu, r: Register) {
         let n = self.registers.get_r(&r);
+        match alu {
+            Alu::ADD => self.add_a_n(n),
+            Alu::ADC => self.adc_a_n(n),
+            Alu::SUB => self.sub_n(n),
+            Alu::SBC => self.sbc_n(n),
+            Alu::AND => self.and_n(n),
+            Alu::XOR => self.xor_n(n),
+            Alu::OR => self.or_n(n),
+            Alu::CP => self.cp_n(n),
+        }
+    }
+    fn alu_op_hl(&mut self, alu: Alu) {
+        let n = self.memory.read(self.registers.hl());
+        match alu {
+            Alu::ADD => self.add_a_n(n),
+            Alu::ADC => self.adc_a_n(n),
+            Alu::SUB => self.sub_n(n),
+            Alu::SBC => self.sbc_n(n),
+            Alu::AND => self.and_n(n),
+            Alu::XOR => self.xor_n(n),
+            Alu::OR => self.or_n(n),
+            Alu::CP => self.cp_n(n),
+        }
+    }
+    fn alu_op_n(&mut self, alu: Alu, n: u8) {
         match alu {
             Alu::ADD => self.add_a_n(n),
             Alu::ADC => self.adc_a_n(n),
@@ -320,19 +384,6 @@ impl Cpu {
         self.registers.f.subtract = true;
         self.registers.f.carry = carry;
         self.registers.f.half_carry = (self.registers.a & 0xF) < (n & 0xF);
-    }
-
-    fn jr(&mut self, cc: Condition, n: i8) {
-        let should_jump = match cc {
-            Condition::NZ => !self.registers.f.zero,
-            Condition::Z => self.registers.f.zero,
-            Condition::NC => !self.registers.f.carry,
-            Condition::C => self.registers.f.carry,
-            Condition::None => true,
-        };
-        if should_jump {
-            self.pc = self.pc.wrapping_add_signed(n as i16);
-        }
     }
 }
 
