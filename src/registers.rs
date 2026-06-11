@@ -23,6 +23,7 @@ pub enum Register {
     E,
     H,
     L,
+    F,
 }
 
 #[allow(dead_code)]
@@ -100,6 +101,10 @@ impl Registers {
     pub fn set_hl(&mut self, nn: u16) {
         self.h = (nn >> 8) as u8;
         self.l = (nn & 0xFF) as u8;
+    }
+    pub fn set_af(&mut self, nn: u16) {
+        self.a = (nn >> 8) as u8;
+        self.f = ((nn & 0xFF) as u8).into();
     }
     pub fn af(&self) -> u16 {
         (self.a as u16) << 8 | u8::from(self.f) as u16
@@ -202,12 +207,12 @@ impl Registers {
         self.set_hl(new_value);
     }
 
-
     pub fn set_rp(&mut self, rp: RegisterPair, nn: u16) {
         match rp {
             RegisterPair::BC => self.set_bc(nn),
             RegisterPair::DE => self.set_de(nn),
             RegisterPair::HL => self.set_hl(nn),
+            RegisterPair::AF => self.set_af(nn),
             RegisterPair::SP => self.sp = nn,
             _ => unreachable!(),
         }
@@ -251,6 +256,7 @@ impl Registers {
             Register::E => self.e = val,
             Register::H => self.h = val,
             Register::L => self.l = val,
+            Register::F => self.f = val.into(),
         }
     }
 
@@ -263,6 +269,7 @@ impl Registers {
             Register::E => self.e = self.e.wrapping_add(1),
             Register::H => self.h = self.h.wrapping_add(1),
             Register::L => self.l = self.l.wrapping_add(1),
+            Register::F => unreachable!(),
         }
     }
 
@@ -275,6 +282,7 @@ impl Registers {
             Register::E => self.e = self.e.wrapping_sub(1),
             Register::H => self.h = self.h.wrapping_sub(1),
             Register::L => self.l = self.l.wrapping_sub(1),
+            Register::F => unreachable!(),
         }
     }
 
@@ -287,6 +295,7 @@ impl Registers {
             Register::E => self.e,
             Register::H => self.h,
             Register::L => self.l,
+            Register::F => u8::from(self.f),
         }
     }
 }

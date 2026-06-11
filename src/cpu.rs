@@ -89,10 +89,15 @@ impl Cpu {
 
     fn pop(&mut self) -> u16 {
         let low = self.memory.read(self.registers.sp);
-        self.registers.sp += 1;
+        self.registers.sp.wrapping_add(1);
         let high = self.memory.read(self.registers.sp);
-        self.registers.sp += 1;
+        self.registers.sp.wrapping_add(1);
         ((high as u16) << 8) | low as u16
+    }
+
+    fn pop_rp2(&mut self, rp: RegisterPair) {
+        let val = self.pop();
+        self.registers.set_rp(rp, val);
     }
 
     #[bitmatch]
@@ -212,8 +217,32 @@ impl Cpu {
                     0..=3 => {
                         self.ret(cc(y));
                     }
+                    4 => {
+                        let n = self.fetch();
+                        self.ld_addr_r(0xFF00 + n as u16, Register::A);
+                    }
+                    5 => {
+                        let d = self.fetch() as i8;
+                        self.add_sp_d(d);
+                    }
+                    6 => {
+                        let n = self.fetch();
+                        self.ld_r_addr(Register::A, 0xFF00 + n as u16)
+                    }
+                    7 => {
+                        let d = self.fetch() as i8;
+                        self.ld_hl_sp_d(d);
+                    }
                     _ => unreachable!(),
                 },
+                1 => {
+                    let q = y % 2;
+                    let p = y >> 1;
+
+                    if q == 0 {
+                        self.pop_rp2(rp(p));
+                    }
+                }
                 _ => unreachable!(),
             },
 
@@ -299,6 +328,24 @@ impl Cpu {
         self.memory.write(nn, (self.registers.sp & 0xFF) as u8);
         self.memory.write(nn + 1, (self.registers.sp >> 8) as u8);
     }
+    fn ld_hl_sp_d(&mut self, d: i8) {
+        let old_sp_low = self.registers.sp as u8;
+        let d_unsigned = d as u8;
+
+        let new_sp = self.registers.sp.wrapping_add_signed(d as i16);
+
+        let (_, carry) = old_sp_low.overflowing_add(d_unsigned);
+
+        self.registers.f.zero = false;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (old_sp_low & 0xF) + (d_unsigned & 0xF) > 0xF;
+        self.registers.set_hl(new_sp);
+    }
+    fn ld_r_n(&mut self, r: Register, n: u8) {}
+
+    fn ld_r_addr(&mut self, r: Register, addr: u16) {}
+    fn ld_addr_r(&mut self, v: u16, r: Register) {}
 
     fn ld_r_r(&mut self, r1: Register, r2: Register) {
         let r2_val = self.registers.get_r(&r2);
@@ -324,6 +371,20 @@ impl Cpu {
         self.registers.f.subtract = false;
         self.registers.f.carry = carry;
         self.registers.f.half_carry = (n & 0xF) + (old_a & 0xF) > 0xF;
+    }
+
+    fn add_sp_d(&mut self, d: i8) {
+        let old_sp_low = self.registers.sp as u8;
+        let d_unsigned = d as u8;
+
+        self.registers.sp = self.registers.sp.wrapping_add_signed(d as i16);
+
+        let (_, carry) = old_sp_low.overflowing_add(d_unsigned);
+
+        self.registers.f.zero = false;
+        self.registers.f.subtract = false;
+        self.registers.f.carry = carry;
+        self.registers.f.half_carry = (old_sp_low & 0xF) + (d_unsigned & 0xF) > 0xF;
     }
 
     fn adc_a_n(&mut self, n: u8) {
