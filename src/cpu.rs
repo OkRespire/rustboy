@@ -241,8 +241,59 @@ impl Cpu {
 
                     if q == 0 {
                         self.pop_rp2(rp(p));
+                    } else {
+                        match p {
+                            0 => {
+                                self.ret(Condition::None);
+                            }
+                            1 => {
+                                self.reti();
+                            }
+                            2 => {
+                                let nn = self.registers.hl();
+                                self.jp(Condition::None, nn);
+                            }
+                            3 => {
+                                self.registers.sp = self.registers.hl();
+                            }
+
+                            _ => unreachable!(),
+                        }
                     }
                 }
+                2 => match y {
+                    0..=3 => {
+                        let nn = self.fetch_u16();
+                        self.jp(cc(y), nn);
+                    }
+                    4 => {
+                        let addr = 0xFF00 + self.registers.c as u16;
+                        self.ld_addr_r(addr, Register::A)
+                    }
+                    5 => {
+                        let nn = self.fetch_u16();
+                        self.ld_nn_r(nn, Register::A);
+                    }
+                    6 => {
+                        let addr = 0xFF00 + self.registers.c as u16;
+                        self.ld_r_addr(Register::A, addr);
+                    }
+                    7 => {
+                        let nn = self.fetch_u16();
+                        self.ld_r_nn(Register::A, nn);
+                    }
+                    _ => unreachable!(),
+                },
+                3 => match y {
+                    0 => {
+                        let nn = self.fetch_u16();
+                        self.jp(Condition::None, nn);
+                    }
+                    1 => unimplemented!(),
+                    6 => self.di(),
+                    7 => self.ei(),
+                    _ => unreachable!(),
+                },
                 _ => unreachable!(),
             },
 
@@ -259,17 +310,33 @@ impl Cpu {
         }
     }
     fn jr(&mut self, cc: Condition, n: i8) {
-        let should_jump = self.cc_match(cc);
-        if should_jump {
+        if self.cc_match(cc) {
             self.pc = self.pc.wrapping_add_signed(n as i16);
         }
     }
 
+    fn jp(&mut self, cc: Condition, nn: u16) {
+        if self.cc_match(cc) {
+            self.pc = nn;
+        }
+    }
+
     fn ret(&mut self, cc: Condition) {
-        let should_ret = self.cc_match(cc);
-        if should_ret {
+        if self.cc_match(cc) {
             self.pc = self.pop();
         }
+    }
+
+    fn reti(&mut self) {
+        self.ei();
+        self.ret(Condition::None)
+    }
+
+    fn ei(&mut self) {
+        self.ime = true;
+    }
+    fn di(&mut self) {
+        self.ime = false;
     }
 
     fn acc_flags(&mut self, af: AccFlag) {
@@ -342,10 +409,23 @@ impl Cpu {
         self.registers.f.half_carry = (old_sp_low & 0xF) + (d_unsigned & 0xF) > 0xF;
         self.registers.set_hl(new_sp);
     }
-    fn ld_r_n(&mut self, r: Register, n: u8) {}
+    fn ld_nn_r(&mut self, nn: u16, r: Register) {
+        let val = self.memory.read(nn);
+        self.registers.set_r(r, val);
+    }
 
-    fn ld_r_addr(&mut self, r: Register, addr: u16) {}
-    fn ld_addr_r(&mut self, v: u16, r: Register) {}
+    fn ld_r_nn(&mut self, r: Register, nn: u16) {
+        let reg = self.registers.get_r(&r);
+        self.memory.write(nn, reg);
+    }
+
+    fn ld_r_addr(&mut self, r: Register, addr: u16) {
+        let reg = self.registers.get_r(&r);
+        self.memory.write(addr, reg);
+    }
+    fn ld_addr_r(&mut self, addr: u16, r: Register) {
+        self.registers.set_r(r, self.memory.read(addr));
+    }
 
     fn ld_r_r(&mut self, r1: Register, r2: Register) {
         let r2_val = self.registers.get_r(&r2);
