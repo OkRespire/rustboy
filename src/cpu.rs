@@ -89,15 +89,35 @@ impl Cpu {
 
     fn pop(&mut self) -> u16 {
         let low = self.memory.read(self.registers.sp);
-        self.registers.sp.wrapping_add(1);
+        self.registers.sp = self.registers.sp.wrapping_add(1);
         let high = self.memory.read(self.registers.sp);
-        self.registers.sp.wrapping_add(1);
+        self.registers.sp = self.registers.sp.wrapping_add(1);
         ((high as u16) << 8) | low as u16
+    }
+
+    fn push(&mut self, nn: u16) {
+        let low = (nn & 0xFF) as u8;
+        let high = (nn >> 8) as u8;
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+        self.memory.write(self.registers.sp, high);
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+        self.memory.write(self.registers.sp, low);
     }
 
     fn pop_rp2(&mut self, rp: RegisterPair) {
         let val = self.pop();
         self.registers.set_rp(rp, val);
+    }
+
+    fn push_rp2(&mut self, rp: RegisterPair) {
+        let val = self.registers.get_rp(&rp);
+        let low = (val & 0xFF) as u8;
+        let high = (val >> 8) as u8;
+
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+        self.memory.write(self.registers.sp, high);
+        self.registers.sp = self.registers.sp.wrapping_sub(1);
+        self.memory.write(self.registers.sp, low);
     }
 
     #[bitmatch]
@@ -147,7 +167,12 @@ impl Cpu {
                 2 => {
                     let q = y % 2;
                     let p = y >> 1;
-                    let addr = self.registers.get_rp(&rp(p));
+                    let addr = if p == 2 || p == 3 {
+                        self.registers.get_rp(&RegisterPair::HL)
+                    } else {
+                        self.registers.get_rp(&rp(p))
+                    };
+
                     match p {
                         2 => self.registers.inc_rp(RegisterPair::HL),
                         3 => self.registers.dec_rp(RegisterPair::HL),
@@ -207,11 +232,21 @@ impl Cpu {
             "01yyyzzz" => {
                 if y == 6 && z == 6 {
                     self.halt();
+                } else if y != 6 && z == 6 {
+                    self.ld_r_hl(r(y))
+                } else if y == 6 && z != 6 {
+                    self.ld_hl_r(r(z))
                 } else {
                     self.ld_r_r(r(y), r(z));
                 }
             }
-            "10yyyzzz" => self.alu_op_r(alu(y), r(z)),
+            "10yyyzzz" => {
+                if z == 6 {
+                    self.alu_op_hl(alu(y))
+                } else {
+                    self.alu_op_r(alu(y), r(z))
+                }
+            }
             "11yyyzzz" => match z {
                 0 => match y {
                     0..=3 => {
@@ -240,7 +275,7 @@ impl Cpu {
                     let p = y >> 1;
 
                     if q == 0 {
-                        self.pop_rp2(rp(p));
+                        self.pop_rp2(rp2(p));
                     } else {
                         match p {
                             0 => {
@@ -294,6 +329,34 @@ impl Cpu {
                     7 => self.ei(),
                     _ => unreachable!(),
                 },
+                4 => match y {
+                    0..=3 => {
+                        let nn = self.fetch_u16();
+                        self.call(cc(y), nn);
+                    }
+                    _ => unreachable!(),
+                },
+                5 => {
+                    let q = y % 2;
+                    let p = y >> 1;
+
+                    if q == 0 {
+                        self.push_rp2(rp2(p));
+                    } else {
+                        match p {
+                            0 => {
+                                let nn = self.fetch_u16();
+                                self.call(Condition::None, nn);
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                6 => {
+                    let n = self.fetch();
+                    self.alu_op_n(alu(y), n);
+                }
+                7 => self.rst(y),
                 _ => unreachable!(),
             },
 
@@ -319,6 +382,17 @@ impl Cpu {
         if self.cc_match(cc) {
             self.pc = nn;
         }
+    }
+
+    fn call(&mut self, cc: Condition, nn: u16) {
+        if self.cc_match(cc) {
+            self.push(self.pc);
+            self.pc = nn;
+        }
+    }
+    fn rst(&mut self, y: u8) {
+        self.push(self.pc);
+        self.pc = (y * 8) as u16;
     }
 
     fn ret(&mut self, cc: Condition) {
@@ -409,22 +483,30 @@ impl Cpu {
         self.registers.f.half_carry = (old_sp_low & 0xF) + (d_unsigned & 0xF) > 0xF;
         self.registers.set_hl(new_sp);
     }
-    fn ld_nn_r(&mut self, nn: u16, r: Register) {
-        let val = self.memory.read(nn);
+    fn ld_r_hl(&mut self, r: Register) {
+        let val = self.memory.read(self.registers.hl());
         self.registers.set_r(r, val);
     }
-
-    fn ld_r_nn(&mut self, r: Register, nn: u16) {
+    fn ld_hl_r(&mut self, r: Register) {
+        let val = self.registers.get_r(&r);
+        self.memory.write(self.registers.hl(), val);
+    }
+    fn ld_nn_r(&mut self, nn: u16, r: Register) {
         let reg = self.registers.get_r(&r);
         self.memory.write(nn, reg);
     }
 
+    fn ld_r_nn(&mut self, r: Register, nn: u16) {
+        let val = self.memory.read(nn);
+        self.registers.set_r(r, val);
+    }
+
     fn ld_r_addr(&mut self, r: Register, addr: u16) {
-        let reg = self.registers.get_r(&r);
-        self.memory.write(addr, reg);
+        self.registers.set_r(r, self.memory.read(addr));
     }
     fn ld_addr_r(&mut self, addr: u16, r: Register) {
-        self.registers.set_r(r, self.memory.read(addr));
+        let reg = self.registers.get_r(&r);
+        self.memory.write(addr, reg);
     }
 
     fn ld_r_r(&mut self, r1: Register, r2: Register) {
@@ -532,8 +614,18 @@ fn rp(p: u8) -> RegisterPair {
     match p {
         0 => RegisterPair::BC,
         1 => RegisterPair::DE,
-        2 | 6 => RegisterPair::HL,
+        2 => RegisterPair::HL,
         3 => RegisterPair::SP,
+        _ => unreachable!(),
+    }
+}
+
+fn rp2(p: u8) -> RegisterPair {
+    match p {
+        0 => RegisterPair::BC,
+        1 => RegisterPair::DE,
+        2 => RegisterPair::HL,
+        3 => RegisterPair::AF,
         _ => unreachable!(),
     }
 }
@@ -584,7 +676,7 @@ fn alu(y: u8) -> Alu {
         4 => Alu::AND,
         5 => Alu::XOR,
         6 => Alu::OR,
-        7 => Alu::XOR,
+        7 => Alu::CP,
         _ => unreachable!(),
     }
 }

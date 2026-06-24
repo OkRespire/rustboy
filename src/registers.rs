@@ -214,7 +214,6 @@ impl Registers {
             RegisterPair::HL => self.set_hl(nn),
             RegisterPair::AF => self.set_af(nn),
             RegisterPair::SP => self.sp = nn,
-            _ => unreachable!(),
         }
     }
 
@@ -269,7 +268,7 @@ impl Registers {
             Register::E => self.e = self.e.wrapping_add(1),
             Register::H => self.h = self.h.wrapping_add(1),
             Register::L => self.l = self.l.wrapping_add(1),
-            Register::F => unreachable!(),
+            _ => unreachable!(),
         }
     }
 
@@ -282,7 +281,7 @@ impl Registers {
             Register::E => self.e = self.e.wrapping_sub(1),
             Register::H => self.h = self.h.wrapping_sub(1),
             Register::L => self.l = self.l.wrapping_sub(1),
-            Register::F => unreachable!(),
+            _ => unreachable!(),
         }
     }
 
