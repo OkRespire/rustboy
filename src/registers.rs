@@ -24,6 +24,7 @@ pub enum Register {
     H,
     L,
     F,
+    HLDirect,
 }
 
 #[allow(dead_code)]
@@ -118,38 +119,6 @@ impl Registers {
     }
     pub fn hl(&self) -> u16 {
         (self.h as u16) << 8 | self.l as u16
-    }
-    pub fn rotate_left(&mut self, r: Register, through_carry: bool) {
-        let val = self.get_r(&r);
-        let bit7 = val >> 7;
-        let carry_in = if through_carry {
-            self.f.carry as u8
-        } else {
-            bit7
-        };
-
-        let res = (val << 1) | carry_in;
-        self.set_r(r, res);
-        self.f.carry = bit7 == 1;
-        self.f.subtract = false;
-        self.f.half_carry = false;
-        self.f.zero = false;
-    }
-
-    pub fn rotate_right(&mut self, r: Register, through_carry: bool) {
-        let val = self.get_r(&r);
-        let bit0 = val & 1;
-        let carry_in = if through_carry {
-            self.f.carry as u8
-        } else {
-            bit0
-        };
-        let res = (carry_in << 7) | val >> 1;
-        self.set_r(r, res);
-        self.f.carry = bit0 == 1;
-        self.f.subtract = false;
-        self.f.half_carry = false;
-        self.f.zero = false;
     }
 
     pub fn daa(&mut self) {
@@ -256,6 +225,7 @@ impl Registers {
             Register::H => self.h = val,
             Register::L => self.l = val,
             Register::F => self.f = val.into(),
+            Register::HLDirect => self.set_hl(val as u16),
         }
     }
 
@@ -295,6 +265,7 @@ impl Registers {
             Register::H => self.h,
             Register::L => self.l,
             Register::F => u8::from(self.f),
+            _ => unreachable!(),
         }
     }
 }

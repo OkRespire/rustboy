@@ -25,6 +25,17 @@ enum AccFlag {
     CCF,
 }
 
+enum CBRot {
+    RLC(Register),
+    RRC(Register),
+    RL(Register),
+    RR(Register),
+    SLA(Register),
+    SRA(Register),
+    SWAP(Register),
+    SRL(Register),
+}
+
 #[allow(dead_code)]
 enum Alu {
     ADD,
@@ -122,6 +133,11 @@ impl Cpu {
 
     #[bitmatch]
     pub fn decode(&mut self, op: u8) {
+        if op == 0xCB {
+            let n = self.fetch();
+            self.decode_cb(n);
+            return;
+        }
         #[bitmatch]
         match op {
             "00yyyzzz" => match z {
@@ -240,13 +256,7 @@ impl Cpu {
                     self.ld_r_r(r(y), r(z));
                 }
             }
-            "10yyyzzz" => {
-                if z == 6 {
-                    self.alu_op_hl(alu(y))
-                } else {
-                    self.alu_op_r(alu(y), r(z))
-                }
-            }
+            "10yyyzzz" => self.alu_op_r(alu(y), r(z)),
             "11yyyzzz" => match z {
                 0 => match y {
                     0..=3 => {
@@ -363,6 +373,27 @@ impl Cpu {
             _ => unimplemented!(),
         }
     }
+
+    #[bitmatch]
+    fn decode_cb(&mut self, n: u8) {
+        #[bitmatch]
+        match n {
+            "xxyyyzzz" => match x {
+                0 => {
+                    if z == 6 {
+                        self.rot_table_hl(rot(y, 6));
+                    } else {
+                    }
+                }
+                1 => todo!(),
+                2 => todo!(),
+                3 => todo!(),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        }
+    }
+
     fn cc_match(&self, cc: Condition) -> bool {
         match cc {
             Condition::NZ => !self.registers.f.zero,
@@ -415,10 +446,10 @@ impl Cpu {
 
     fn acc_flags(&mut self, af: AccFlag) {
         match af {
-            AccFlag::RLCA => self.registers.rotate_left(Register::A, false),
-            AccFlag::RRCA => self.registers.rotate_right(Register::A, false),
-            AccFlag::RLA => self.registers.rotate_left(Register::A, true),
-            AccFlag::RRA => self.registers.rotate_right(Register::A, true),
+            AccFlag::RLCA => self.rotate_left_a(false),
+            AccFlag::RRCA => self.rotate_right_a(false),
+            AccFlag::RLA => self.rotate_left_a(true),
+            AccFlag::RRA => self.rotate_right_a(true),
             AccFlag::DAA => self.registers.daa(),
             AccFlag::CPL => self.registers.cpl(),
             AccFlag::SCF => self.registers.scf(),
@@ -426,21 +457,25 @@ impl Cpu {
         }
     }
 
-    fn alu_op_r(&mut self, alu: Alu, r: Register) {
-        let n = self.registers.get_r(&r);
-        match alu {
-            Alu::ADD => self.add_a_n(n),
-            Alu::ADC => self.adc_a_n(n),
-            Alu::SUB => self.sub_n(n),
-            Alu::SBC => self.sbc_n(n),
-            Alu::AND => self.and_n(n),
-            Alu::XOR => self.xor_n(n),
-            Alu::OR => self.or_n(n),
-            Alu::CP => self.cp_n(n),
+    fn rot_table(&mut self, rot: CBRot) {
+        match rot {
+            CBRot::RLC(register) => self.rotate_left(register, false),
+            CBRot::RRC(register) => self.rotate_right(register, false),
+            CBRot::RL(register) => self.rotate_left(register, true),
+            CBRot::RR(register) => self.rotate_right(register, true),
+            CBRot::SLA(register) => todo!(),
+            CBRot::SRA(register) => todo!(),
+            CBRot::SWAP(register) => todo!(),
+
+            CBRot::SRL(register) => todo!(),
         }
     }
-    fn alu_op_hl(&mut self, alu: Alu) {
-        let n = self.memory.read(self.registers.hl());
+
+    fn alu_op_r(&mut self, alu: Alu, r: Register) {
+        let n = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
         match alu {
             Alu::ADD => self.add_a_n(n),
             Alu::ADC => self.adc_a_n(n),
@@ -608,6 +643,82 @@ impl Cpu {
         self.registers.f.carry = carry;
         self.registers.f.half_carry = (self.registers.a & 0xF) < (n & 0xF);
     }
+
+    fn rotate_left(&mut self, r: Register, through_carry: bool) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+        let bit7 = val >> 7;
+        let carry_in = if through_carry {
+            self.registers.f.carry as u8
+        } else {
+            bit7
+        };
+
+        let res = (val << 1) | carry_in;
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+        self.registers.f.carry = bit7 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = res == 0;
+    }
+    fn rotate_left_a(&mut self, through_carry: bool) {
+        let val = self.registers.a;
+        let bit7 = val >> 7;
+        let carry_in = if through_carry {
+            self.registers.f.carry as u8
+        } else {
+            bit7
+        };
+
+        let res = (val << 1) | carry_in;
+        self.registers.set_r(Register::A, res);
+        self.registers.f.carry = bit7 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = false;
+    }
+
+    fn rotate_right(&mut self, r: Register, through_carry: bool) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+        let bit0 = val & 1;
+        let carry_in = if through_carry {
+            self.registers.f.carry as u8
+        } else {
+            bit0
+        };
+        let res = (carry_in << 7) | val >> 1;
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+        self.registers.f.carry = bit0 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = res == 0;
+    }
+    fn rotate_right_a(&mut self, through_carry: bool) {
+        let val = self.registers.a;
+        let bit0 = val & 1;
+        let carry_in = if through_carry {
+            self.registers.f.carry as u8
+        } else {
+            bit0
+        };
+        let res = (carry_in << 7) | val >> 1;
+        self.registers.set_r(Register::A, res);
+        self.registers.f.carry = bit0 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = false;
+    }
 }
 
 fn rp(p: u8) -> RegisterPair {
@@ -638,6 +749,7 @@ fn r(y: u8) -> Register {
         3 => Register::E,
         4 => Register::H,
         5 => Register::L,
+        6 => Register::HLDirect,
         7 => Register::A,
         _ => unreachable!(),
     }
@@ -677,6 +789,20 @@ fn alu(y: u8) -> Alu {
         5 => Alu::XOR,
         6 => Alu::OR,
         7 => Alu::CP,
+        _ => unreachable!(),
+    }
+}
+
+fn rot(y: u8, z: u8) -> CBRot {
+    match y {
+        0 => CBRot::RLC(r(z)),
+        1 => CBRot::RRC(r(z)),
+        2 => CBRot::RL(r(z)),
+        3 => CBRot::RR(r(z)),
+        4 => CBRot::SLA(r(z)),
+        5 => CBRot::SRA(r(z)),
+        6 => CBRot::SWAP(r(z)),
+        7 => CBRot::SRL(r(z)),
         _ => unreachable!(),
     }
 }
