@@ -229,31 +229,6 @@ impl Registers {
         }
     }
 
-    pub fn inc_r(&mut self, r: Register) {
-        match r {
-            Register::A => self.a = self.a.wrapping_add(1),
-            Register::B => self.b = self.b.wrapping_add(1),
-            Register::C => self.c = self.c.wrapping_add(1),
-            Register::D => self.d = self.d.wrapping_add(1),
-            Register::E => self.e = self.e.wrapping_add(1),
-            Register::H => self.h = self.h.wrapping_add(1),
-            Register::L => self.l = self.l.wrapping_add(1),
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn dec_r(&mut self, r: Register) {
-        match r {
-            Register::A => self.a = self.a.wrapping_sub(1),
-            Register::B => self.b = self.b.wrapping_sub(1),
-            Register::C => self.c = self.c.wrapping_sub(1),
-            Register::D => self.d = self.d.wrapping_sub(1),
-            Register::E => self.e = self.e.wrapping_sub(1),
-            Register::H => self.h = self.h.wrapping_sub(1),
-            Register::L => self.l = self.l.wrapping_sub(1),
-            _ => unreachable!(),
-        }
-    }
 
     pub fn get_r(&self, r: &Register) -> u8 {
         match r {

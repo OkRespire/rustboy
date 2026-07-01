@@ -217,7 +217,7 @@ impl Cpu {
                         let new_val = val.wrapping_add(1);
                         self.memory.write(self.registers.hl(), new_val);
                     } else {
-                        self.registers.inc_r(r(y))
+                        self.inc_r(r(y))
                     }
                 }
 
@@ -227,7 +227,7 @@ impl Cpu {
                         let new_val = val.wrapping_sub(1);
                         self.memory.write(self.registers.hl(), new_val);
                     } else {
-                        self.registers.dec_r(r(y))
+                        self.dec_r(r(y))
                     }
                 }
 
@@ -379,15 +379,10 @@ impl Cpu {
         #[bitmatch]
         match n {
             "xxyyyzzz" => match x {
-                0 => {
-                    if z == 6 {
-                        self.rot_table_hl(rot(y, 6));
-                    } else {
-                    }
-                }
-                1 => todo!(),
-                2 => todo!(),
-                3 => todo!(),
+                0 => self.rot_table(rot(y, z)),
+                1 => self.bit(y, r(z)),
+                2 => self.res(y, r(z)),
+                3 => self.set(y, r(z)),
                 _ => unreachable!(),
             },
             _ => unreachable!(),
@@ -443,6 +438,17 @@ impl Cpu {
     fn di(&mut self) {
         self.ime = false;
     }
+    fn bit(&mut self, y: u8, r: Register) {
+        let n = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+
+        self.registers.f.zero = if (n >> y) & 1 == 0 { true } else { false };
+
+        self.registers.f.half_carry = true;
+        self.registers.f.subtract = false;
+    }
 
     fn acc_flags(&mut self, af: AccFlag) {
         match af {
@@ -463,11 +469,10 @@ impl Cpu {
             CBRot::RRC(register) => self.rotate_right(register, false),
             CBRot::RL(register) => self.rotate_left(register, true),
             CBRot::RR(register) => self.rotate_right(register, true),
-            CBRot::SLA(register) => todo!(),
-            CBRot::SRA(register) => todo!(),
-            CBRot::SWAP(register) => todo!(),
-
-            CBRot::SRL(register) => todo!(),
+            CBRot::SLA(register) => self.sla(register),
+            CBRot::SRA(register) => self.sra(register),
+            CBRot::SWAP(register) => self.swap(register),
+            CBRot::SRL(register) => self.srl(register),
         }
     }
 
@@ -718,6 +723,142 @@ impl Cpu {
         self.registers.f.subtract = false;
         self.registers.f.half_carry = false;
         self.registers.f.zero = false;
+    }
+
+    fn inc_r(&mut self, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+
+        let res = val.wrapping_add(1);
+        self.registers.f.subtract = false;
+        self.registers.f.zero = res == 0;
+        self.registers.f.half_carry = (val & 0xF) + (1 & 0xF) > 0xF;
+
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+    }
+
+    fn dec_r(&mut self, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+
+        let res = val.wrapping_sub(1);
+        self.registers.f.subtract = true;
+        self.registers.f.zero = res == 0;
+        self.registers.f.half_carry = val < 1;
+
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+    }
+    fn sla(&mut self, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+        let bit7 = (val >> 7) & 1;
+        let res = val << 1;
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+        self.registers.f.carry = bit7 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = res == 0;
+    }
+
+    fn sra(&mut self, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+        let bit0 = val & 1;
+        let bit7 = val & 0x80;
+        let res = val >> 1 | bit7;
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+        self.registers.f.carry = bit0 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = res == 0;
+    }
+
+    fn srl(&mut self, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+        let bit0 = val & 1;
+        let res = val >> 1;
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            _ => self.registers.set_r(r, res),
+        };
+        self.registers.f.carry = bit0 == 1;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = res == 0;
+    }
+    fn swap(&mut self, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+
+        let low = val & 0x0F;
+        let high = val >> 4;
+        let new_val = ((low) << 4) | high;
+
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), new_val),
+            _ => self.registers.set_r(r, new_val),
+        }
+
+        self.registers.f.carry = false;
+        self.registers.f.subtract = false;
+        self.registers.f.half_carry = false;
+        self.registers.f.zero = new_val == 0;
+    }
+
+    fn res(&mut self, y: u8, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+
+        let mask = !(1u8 << y);
+
+        let new_val = val & mask;
+
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), new_val),
+            _ => self.registers.set_r(r, new_val),
+        }
+    }
+    fn set(&mut self, y: u8, r: Register) {
+        let val = match r {
+            Register::HLDirect => self.memory.read(self.registers.hl()),
+            _ => self.registers.get_r(&r),
+        };
+
+        let mask = 1u8 << y;
+
+        let new_val = val | mask;
+
+        match r {
+            Register::HLDirect => self.memory.write(self.registers.hl(), new_val),
+            _ => self.registers.set_r(r, new_val),
+        }
     }
 }
 
