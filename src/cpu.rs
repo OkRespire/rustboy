@@ -87,7 +87,7 @@ impl Cpu {
             self.halt_bug = false;
             self.pc
         } else {
-            self.pc + 1
+            self.pc.wrapping_add(1)
         };
         op
     }
@@ -751,7 +751,7 @@ impl Cpu {
         let res = val.wrapping_sub(1);
         self.registers.f.subtract = true;
         self.registers.f.zero = res == 0;
-        self.registers.f.half_carry = val < 1;
+        self.registers.f.half_carry = (val & 0xF) == 0;
 
         match r {
             Register::HLDirect => self.memory.write(self.registers.hl(), res),
