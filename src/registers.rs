@@ -1,17 +1,25 @@
-/// Adapted from https://rylev.github.io/DMG-01/public/book/cpu/registers.html
+//! Adapted from `<https://rylev.github.io/DMG-01/public/book/cpu/registers.html>`
 
 const ZERO_FLAG_BYTE_POSITION: u8 = 7;
 const SUBTRACT_FLAG_BYTE_POSITION: u8 = 6;
 const HALF_CARRY_FLAG_BYTE_POSITION: u8 = 5;
 const CARRY_FLAG_BYTE_POSITION: u8 = 4;
 
-#[allow(dead_code)]
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy)]
 pub struct FlagsRegister {
     pub zero: bool,
     pub subtract: bool,
     pub half_carry: bool,
     pub carry: bool,
+}
+
+pub enum Condition {
+    NZ,
+    Z,
+    NC,
+    C,
+    None,
 }
 
 #[allow(dead_code)]
@@ -54,10 +62,10 @@ impl From<u8> for FlagsRegister {
 
 impl From<FlagsRegister> for u8 {
     fn from(flag: FlagsRegister) -> Self {
-        (if flag.zero { 1 } else { 0 }) << ZERO_FLAG_BYTE_POSITION
-            | (if flag.subtract { 1 } else { 0 }) << SUBTRACT_FLAG_BYTE_POSITION
-            | (if flag.half_carry { 1 } else { 0 }) << HALF_CARRY_FLAG_BYTE_POSITION
-            | (if flag.carry { 1 } else { 0 }) << CARRY_FLAG_BYTE_POSITION
+        (u8::from(flag.zero)) << ZERO_FLAG_BYTE_POSITION
+            | (u8::from(flag.subtract)) << SUBTRACT_FLAG_BYTE_POSITION
+            | (u8::from(flag.half_carry)) << HALF_CARRY_FLAG_BYTE_POSITION
+            | (u8::from(flag.carry)) << CARRY_FLAG_BYTE_POSITION
     }
 }
 
@@ -108,17 +116,27 @@ impl Registers {
         self.f = ((nn & 0xFF) as u8).into();
     }
     pub fn af(&self) -> u16 {
-        (self.a as u16) << 8 | u8::from(self.f) as u16
+        u16::from(self.a) << 8 | u16::from(u8::from(self.f))
     }
     pub fn bc(&self) -> u16 {
-        (self.b as u16) << 8 | self.c as u16
+        u16::from(self.b) << 8 | u16::from(self.c)
     }
 
     pub fn de(&self) -> u16 {
-        (self.d as u16) << 8 | self.e as u16
+        u16::from(self.d) << 8 | u16::from(self.e)
     }
     pub fn hl(&self) -> u16 {
-        (self.h as u16) << 8 | self.l as u16
+        u16::from(self.h) << 8 | u16::from(self.l)
+    }
+
+    pub fn cc_match(&self, cc: &Condition) -> bool {
+        match cc {
+            Condition::NZ => !self.f.zero,
+            Condition::Z => self.f.zero,
+            Condition::NC => !self.f.carry,
+            Condition::C => self.f.carry,
+            Condition::None => true,
+        }
     }
 
     pub fn daa(&mut self) {
@@ -166,9 +184,9 @@ impl Registers {
         self.f.half_carry = false;
     }
 
-    pub fn add_hl(&mut self, r2: RegisterPair) {
+    pub fn add_hl(&mut self, r2: &RegisterPair) {
         let hl = self.hl();
-        let r2_val = self.get_rp(&r2);
+        let r2_val = self.get_rp(r2);
         let (new_value, did_overflow) = hl.overflowing_add(r2_val);
         self.f.subtract = false;
         self.f.carry = did_overflow;
@@ -176,7 +194,7 @@ impl Registers {
         self.set_hl(new_value);
     }
 
-    pub fn set_rp(&mut self, rp: RegisterPair, nn: u16) {
+    pub fn set_rp(&mut self, rp: &RegisterPair, nn: u16) {
         match rp {
             RegisterPair::BC => self.set_bc(nn),
             RegisterPair::DE => self.set_de(nn),
@@ -186,23 +204,23 @@ impl Registers {
         }
     }
 
-    pub fn inc_rp(&mut self, rp: RegisterPair) {
+    pub fn inc_rp(&mut self, rp: &RegisterPair) {
         match rp {
             RegisterPair::BC => self.set_bc(self.bc().wrapping_add(1)),
             RegisterPair::DE => self.set_de(self.de().wrapping_add(1)),
             RegisterPair::HL => self.set_hl(self.hl().wrapping_add(1)),
             RegisterPair::SP => self.sp = self.sp.wrapping_add(1),
-            _ => unreachable!(),
+            RegisterPair::AF => unreachable!(),
         }
     }
 
-    pub fn dec_rp(&mut self, rp: RegisterPair) {
+    pub fn dec_rp(&mut self, rp: &RegisterPair) {
         match rp {
             RegisterPair::BC => self.set_bc(self.bc().wrapping_sub(1)),
             RegisterPair::DE => self.set_de(self.de().wrapping_sub(1)),
             RegisterPair::HL => self.set_hl(self.hl().wrapping_sub(1)),
             RegisterPair::SP => self.sp = self.sp.wrapping_sub(1),
-            _ => unreachable!(),
+            RegisterPair::AF => unreachable!(),
         }
     }
 
@@ -215,7 +233,7 @@ impl Registers {
             RegisterPair::SP => self.sp,
         }
     }
-    pub fn set_r(&mut self, r: Register, val: u8) {
+    pub fn set_r(&mut self, r: &Register, val: u8) {
         match r {
             Register::A => self.a = val,
             Register::B => self.b = val,
@@ -225,10 +243,9 @@ impl Registers {
             Register::H => self.h = val,
             Register::L => self.l = val,
             Register::F => self.f = val.into(),
-            Register::HLDirect => self.set_hl(val as u16),
+            Register::HLDirect => self.set_hl(u16::from(val)),
         }
     }
-
 
     pub fn get_r(&self, r: &Register) -> u8 {
         match r {
@@ -240,7 +257,7 @@ impl Registers {
             Register::H => self.h,
             Register::L => self.l,
             Register::F => u8::from(self.f),
-            _ => unreachable!(),
+            Register::HLDirect => unreachable!(),
         }
     }
 }

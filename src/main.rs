@@ -1,5 +1,6 @@
 mod cpu;
 mod memory;
+// mod old_cpu;
 mod registers;
 
 #[allow(unused_variables, unused_mut)]
