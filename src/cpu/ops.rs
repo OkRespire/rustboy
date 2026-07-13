@@ -1,39 +1,40 @@
 use crate::{
     cpu::{AccFlag, Alu, CBRot, Cpu},
+    memory::Memory,
     registers::{Condition, Register, RegisterPair},
 };
 
 impl Cpu {
-    fn pop(&mut self) -> u16 {
-        let low = self.memory.read(self.registers.sp);
+    fn pop(&mut self, memory: &mut Memory) -> u16 {
+        let low = memory.read(self.registers.sp);
         self.registers.sp = self.registers.sp.wrapping_add(1);
-        let high = self.memory.read(self.registers.sp);
+        let high = memory.read(self.registers.sp);
         self.registers.sp = self.registers.sp.wrapping_add(1);
         (u16::from(high) << 8) | u16::from(low)
     }
 
-    fn push(&mut self, nn: u16) {
+    pub fn push(&mut self, nn: u16, memory: &mut Memory) {
         let low = (nn & 0xFF) as u8;
         let high = (nn >> 8) as u8;
         self.registers.sp = self.registers.sp.wrapping_sub(1);
-        self.memory.write(self.registers.sp, high);
+        memory.write(self.registers.sp, high);
         self.registers.sp = self.registers.sp.wrapping_sub(1);
-        self.memory.write(self.registers.sp, low);
+        memory.write(self.registers.sp, low);
     }
-    pub fn pop_rp2(&mut self, rp: &RegisterPair) {
-        let val = self.pop();
+    pub fn pop_rp2(&mut self, rp: &RegisterPair, memory: &mut Memory) {
+        let val = self.pop(memory);
         self.registers.set_rp(rp, val);
     }
 
-    pub fn push_rp2(&mut self, rp: &RegisterPair) {
+    pub fn push_rp2(&mut self, rp: &RegisterPair, memory: &mut Memory) {
         let val = self.registers.get_rp(rp);
         let low = (val & 0xFF) as u8;
         let high = (val >> 8) as u8;
 
         self.registers.sp = self.registers.sp.wrapping_sub(1);
-        self.memory.write(self.registers.sp, high);
+        memory.write(self.registers.sp, high);
         self.registers.sp = self.registers.sp.wrapping_sub(1);
-        self.memory.write(self.registers.sp, low);
+        memory.write(self.registers.sp, low);
     }
 
     pub fn jr(&mut self, cc: &Condition, n: i8) {
@@ -48,26 +49,26 @@ impl Cpu {
         }
     }
 
-    pub fn call(&mut self, cc: &Condition, nn: u16) {
+    pub fn call(&mut self, cc: &Condition, nn: u16, memory: &mut Memory) {
         if self.registers.cc_match(cc) {
-            self.push(self.pc);
+            self.push(self.pc, memory);
             self.pc = nn;
         }
     }
-    pub fn rst(&mut self, y: u8) {
-        self.push(self.pc);
+    pub fn rst(&mut self, y: u8, memory: &mut Memory) {
+        self.push(self.pc, memory);
         self.pc = u16::from(y * 8);
     }
 
-    pub fn ret(&mut self, cc: &Condition) {
+    pub fn ret(&mut self, cc: &Condition, memory: &mut Memory) {
         if self.registers.cc_match(cc) {
-            self.pc = self.pop();
+            self.pc = self.pop(memory);
         }
     }
 
-    pub fn reti(&mut self) {
+    pub fn reti(&mut self, memory: &mut Memory) {
         self.ei();
-        self.ret(&Condition::None);
+        self.ret(&Condition::None, memory);
     }
 
     pub fn ei(&mut self) {
@@ -76,9 +77,9 @@ impl Cpu {
     pub fn di(&mut self) {
         self.ime = false;
     }
-    pub fn bit(&mut self, y: u8, r: &Register) {
+    pub fn bit(&mut self, y: u8, r: &Register, memory: &mut Memory) {
         let n = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
 
@@ -100,22 +101,22 @@ impl Cpu {
         }
     }
 
-    pub fn rot_table(&mut self, rot: &CBRot) {
+    pub fn rot_table(&mut self, rot: &CBRot, memory: &mut Memory) {
         match rot {
-            CBRot::Rlc(register) => self.rotate_left(register, false),
-            CBRot::Rrc(register) => self.rotate_right(register, false),
-            CBRot::Rl(register) => self.rotate_left(register, true),
-            CBRot::Rr(register) => self.rotate_right(register, true),
-            CBRot::Sla(register) => self.sla(register),
-            CBRot::Sra(register) => self.sra(register),
-            CBRot::Swap(register) => self.swap(register),
-            CBRot::Srl(register) => self.srl(register),
+            CBRot::Rlc(register) => self.rotate_left(register, false, memory),
+            CBRot::Rrc(register) => self.rotate_right(register, false, memory),
+            CBRot::Rl(register) => self.rotate_left(register, true, memory),
+            CBRot::Rr(register) => self.rotate_right(register, true, memory),
+            CBRot::Sla(register) => self.sla(register, memory),
+            CBRot::Sra(register) => self.sra(register, memory),
+            CBRot::Swap(register) => self.swap(register, memory),
+            CBRot::Srl(register) => self.srl(register, memory),
         }
     }
 
-    pub fn alu_op_r(&mut self, alu: &Alu, r: &Register) {
+    pub fn alu_op_r(&mut self, alu: &Alu, r: &Register, memory: &mut Memory) {
         let n = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
         match alu {
@@ -142,9 +143,9 @@ impl Cpu {
         }
     }
 
-    pub fn ld_nn_sp(&mut self, nn: u16) {
-        self.memory.write(nn, (self.registers.sp & 0xFF) as u8);
-        self.memory.write(nn + 1, (self.registers.sp >> 8) as u8);
+    pub fn ld_nn_sp(&mut self, nn: u16, memory: &mut Memory) {
+        memory.write(nn, (self.registers.sp & 0xFF) as u8);
+        memory.write(nn + 1, (self.registers.sp >> 8) as u8);
     }
     #[allow(clippy::cast_possible_truncation)]
     pub fn ld_hl_sp_d(&mut self, d: i8) {
@@ -161,30 +162,30 @@ impl Cpu {
         self.registers.f.half_carry = (old_sp_low & 0xF) + (d_unsigned & 0xF) > 0xF;
         self.registers.set_hl(new_sp);
     }
-    pub fn ld_r_hl(&mut self, r: &Register) {
-        let val = self.memory.read(self.registers.hl());
+    pub fn ld_r_hl(&mut self, r: &Register, memory: &mut Memory) {
+        let val = memory.read(self.registers.hl());
         self.registers.set_r(r, val);
     }
-    pub fn ld_hl_r(&mut self, r: &Register) {
+    pub fn ld_hl_r(&mut self, r: &Register, memory: &mut Memory) {
         let val = self.registers.get_r(r);
-        self.memory.write(self.registers.hl(), val);
+        memory.write(self.registers.hl(), val);
     }
-    pub fn ld_nn_r(&mut self, nn: u16, r: &Register) {
+    pub fn ld_nn_r(&mut self, nn: u16, r: &Register, memory: &mut Memory) {
         let reg = self.registers.get_r(r);
-        self.memory.write(nn, reg);
+        memory.write(nn, reg);
     }
 
-    pub fn ld_r_nn(&mut self, r: &Register, nn: u16) {
-        let val = self.memory.read(nn);
+    pub fn ld_r_nn(&mut self, r: &Register, nn: u16, memory: &mut Memory) {
+        let val = memory.read(nn);
         self.registers.set_r(r, val);
     }
 
-    pub fn ld_r_addr(&mut self, r: &Register, addr: u16) {
-        self.registers.set_r(r, self.memory.read(addr));
+    pub fn ld_r_addr(&mut self, r: &Register, addr: u16, memory: &mut Memory) {
+        self.registers.set_r(r, memory.read(addr));
     }
-    pub fn ld_addr_r(&mut self, addr: u16, r: &Register) {
+    pub fn ld_addr_r(&mut self, addr: u16, r: &Register, memory: &mut Memory) {
         let reg = self.registers.get_r(r);
-        self.memory.write(addr, reg);
+        memory.write(addr, reg);
     }
 
     pub fn ld_r_r(&mut self, r1: &Register, r2: &Register) {
@@ -192,8 +193,8 @@ impl Cpu {
         self.registers.set_r(r1, r2_val);
     }
 
-    pub fn halt(&mut self) {
-        let pending = self.memory.read(0xFFFF) & self.memory.read(0xFF0F) != 0;
+    pub fn halt(&mut self, memory: &mut Memory) {
+        let pending = memory.read(0xFFFF) & memory.read(0xFF0F) != 0;
         if self.ime || !pending {
             self.halted = true;
         } else {
@@ -286,9 +287,9 @@ impl Cpu {
         self.registers.f.half_carry = (self.registers.a & 0xF) < (n & 0xF);
     }
 
-    pub fn rotate_left(&mut self, r: &Register, through_carry: bool) {
+    pub fn rotate_left(&mut self, r: &Register, through_carry: bool, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
         let bit7 = val >> 7;
@@ -300,7 +301,7 @@ impl Cpu {
 
         let res = (val << 1) | carry_in;
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
         self.registers.f.carry = bit7 == 1;
@@ -325,9 +326,9 @@ impl Cpu {
         self.registers.f.zero = false;
     }
 
-    pub fn rotate_right(&mut self, r: &Register, through_carry: bool) {
+    pub fn rotate_right(&mut self, r: &Register, through_carry: bool, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
         let bit0 = val & 1;
@@ -338,7 +339,7 @@ impl Cpu {
         };
         let res = (carry_in << 7) | val >> 1;
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
         self.registers.f.carry = bit0 == 1;
@@ -362,9 +363,9 @@ impl Cpu {
         self.registers.f.zero = false;
     }
 
-    pub fn inc_r(&mut self, r: &Register) {
+    pub fn inc_r(&mut self, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
 
@@ -374,14 +375,14 @@ impl Cpu {
         self.registers.f.half_carry = (val & 0xF) + (1 & 0xF) > 0xF;
 
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
     }
 
-    pub fn dec_r(&mut self, r: &Register) {
+    pub fn dec_r(&mut self, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
 
@@ -391,19 +392,19 @@ impl Cpu {
         self.registers.f.half_carry = val.trailing_zeros() >= 4;
 
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
     }
-    pub fn sla(&mut self, r: &Register) {
+    pub fn sla(&mut self, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
         let bit7 = (val >> 7) & 1;
         let res = val << 1;
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
         self.registers.f.carry = bit7 == 1;
@@ -412,16 +413,16 @@ impl Cpu {
         self.registers.f.zero = res == 0;
     }
 
-    pub fn sra(&mut self, r: &Register) {
+    pub fn sra(&mut self, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
         let bit0 = val & 1;
         let bit7 = val & 0x80;
         let res = val >> 1 | bit7;
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
         self.registers.f.carry = bit0 == 1;
@@ -430,15 +431,15 @@ impl Cpu {
         self.registers.f.zero = res == 0;
     }
 
-    pub fn srl(&mut self, r: &Register) {
+    pub fn srl(&mut self, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
         let bit0 = val & 1;
         let res = val >> 1;
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), res),
+            Register::HLDirect => memory.write(self.registers.hl(), res),
             _ => self.registers.set_r(r, res),
         }
         self.registers.f.carry = bit0 == 1;
@@ -446,9 +447,9 @@ impl Cpu {
         self.registers.f.half_carry = false;
         self.registers.f.zero = res == 0;
     }
-    pub fn swap(&mut self, r: &Register) {
+    pub fn swap(&mut self, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
 
@@ -457,7 +458,7 @@ impl Cpu {
         let new_val = ((low) << 4) | high;
 
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), new_val),
+            Register::HLDirect => memory.write(self.registers.hl(), new_val),
             _ => self.registers.set_r(r, new_val),
         }
 
@@ -467,9 +468,9 @@ impl Cpu {
         self.registers.f.zero = new_val == 0;
     }
 
-    pub fn res(&mut self, y: u8, r: &Register) {
+    pub fn res(&mut self, y: u8, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
 
@@ -478,13 +479,13 @@ impl Cpu {
         let new_val = val & mask;
 
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), new_val),
+            Register::HLDirect => memory.write(self.registers.hl(), new_val),
             _ => self.registers.set_r(r, new_val),
         }
     }
-    pub fn set(&mut self, y: u8, r: &Register) {
+    pub fn set(&mut self, y: u8, r: &Register, memory: &mut Memory) {
         let val = match r {
-            Register::HLDirect => self.memory.read(self.registers.hl()),
+            Register::HLDirect => memory.read(self.registers.hl()),
             _ => self.registers.get_r(r),
         };
 
@@ -493,7 +494,7 @@ impl Cpu {
         let new_val = val | mask;
 
         match r {
-            Register::HLDirect => self.memory.write(self.registers.hl(), new_val),
+            Register::HLDirect => memory.write(self.registers.hl(), new_val),
             _ => self.registers.set_r(r, new_val),
         }
     }

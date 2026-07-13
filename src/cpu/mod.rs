@@ -1,7 +1,4 @@
-use crate::{
-    memory::Memory,
-    registers::{Register, Registers},
-};
+use crate::registers::{Register, Registers};
 pub mod fde;
 pub mod helpers;
 pub mod ops;
@@ -43,19 +40,17 @@ pub enum Alu {
 
 #[allow(dead_code)]
 pub struct Cpu {
-    registers: Registers,
-    memory: Memory,
-    pc: u16,
-    halted: bool,
-    halt_bug: bool,
-    ime: bool,
+    pub registers: Registers,
+    pub pc: u16,
+    pub halted: bool,
+    pub halt_bug: bool,
+    pub ime: bool,
 }
 
 impl Default for Cpu {
     fn default() -> Self {
         Self {
             registers: Registers::default(),
-            memory: Memory::default(),
             pc: 0x0100,
             halted: false,
             halt_bug: false,

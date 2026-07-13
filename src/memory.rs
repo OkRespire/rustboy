@@ -13,6 +13,9 @@ pub struct Memory {
 
 impl Default for Memory {
     fn default() -> Self {
+        let mut io = [0u8; 128];
+        io[15] = 0b1110_0001;
+
         Self {
             rom: [0; 16 * 1024],
             rom_bank: [0; 16 * 1024],
@@ -20,9 +23,9 @@ impl Default for Memory {
             ram: [0; 8 * 1024],
             ex_ram: [0; 8 * 1024],
             oam: [0; 160],
-            io: [0; 128],
+            io: io,
             hram: [0; 127],
-            ie: 0,
+            ie: 0b1110_0000,
         }
     }
 }

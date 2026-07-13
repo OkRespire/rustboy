@@ -1,5 +1,6 @@
 use crate::{
     cpu::helpers::{af, alu, cc, r, rot, rp, rp2},
+    memory::Memory,
     registers::{Condition, Register, RegisterPair},
 };
 use bitmatch::bitmatch;
@@ -8,16 +9,8 @@ use crate::cpu::Cpu;
 
 #[allow(dead_code)]
 impl Cpu {
-    pub fn run(&mut self) {
-        if self.halted {
-            // interrupt handle
-        } else {
-            let op = self.fetch();
-            self.decode(op);
-        }
-    }
-    pub fn fetch(&mut self) -> u8 {
-        let op = self.memory.read(self.pc);
+    pub fn fetch(&mut self, memory: &mut Memory) -> u8 {
+        let op = memory.read(self.pc);
         self.pc = if self.halt_bug {
             self.halt_bug = false;
             self.pc
@@ -27,18 +20,18 @@ impl Cpu {
         op
     }
 
-    fn fetch_u16(&mut self) -> u16 {
-        let low = self.fetch();
-        let high = self.fetch();
+    fn fetch_u16(&mut self, memory: &mut Memory) -> u16 {
+        let low = self.fetch(memory);
+        let high = self.fetch(memory);
         (u16::from(high) << 8) | u16::from(low)
     }
 
     #[allow(clippy::too_many_lines)]
     #[bitmatch]
-    pub fn decode(&mut self, op: u8) {
+    pub fn decode(&mut self, op: u8, memory: &mut Memory) {
         if op == 0xCB {
-            let n = self.fetch();
-            self.decode_cb(n);
+            let n = self.fetch(memory);
+            self.decode_cb(n, memory);
             return;
         }
         #[bitmatch]
@@ -47,18 +40,18 @@ impl Cpu {
                 0 => match y {
                     0 => {}
                     1 => {
-                        let nn: u16 = self.fetch_u16();
-                        self.ld_nn_sp(nn);
+                        let nn: u16 = self.fetch_u16(memory);
+                        self.ld_nn_sp(nn, memory);
                     }
                     2 => {
-                        self.fetch();
+                        self.fetch(memory);
                     }
                     3 => {
-                        let n = self.fetch().cast_signed();
+                        let n = self.fetch(memory).cast_signed();
                         self.jr(&Condition::None, n);
                     }
                     4..=7 => {
-                        let n = self.fetch().cast_signed();
+                        let n = self.fetch(memory).cast_signed();
                         self.jr(&cc(y), n);
                     }
                     _ => unreachable!(),
@@ -69,7 +62,7 @@ impl Cpu {
                     let p = y >> 1;
                     match q {
                         0 => {
-                            let nn: u16 = self.fetch_u16();
+                            let nn: u16 = self.fetch_u16(memory);
                             match p {
                                 0..=3 => self.registers.set_rp(&rp(p), nn),
                                 _ => unreachable!(),
@@ -98,8 +91,8 @@ impl Cpu {
                         _ => {}
                     }
                     match q {
-                        0 => self.memory.write(addr, self.registers.a),
-                        1 => self.registers.a = self.memory.read(addr),
+                        0 => memory.write(addr, self.registers.a),
+                        1 => self.registers.a = memory.read(addr),
                         _ => unreachable!(),
                     }
                 }
@@ -116,28 +109,28 @@ impl Cpu {
 
                 4 => {
                     if y == 6 {
-                        let val = self.memory.read(self.registers.hl());
+                        let val = memory.read(self.registers.hl());
                         let new_val = val.wrapping_add(1);
-                        self.memory.write(self.registers.hl(), new_val);
+                        memory.write(self.registers.hl(), new_val);
                     } else {
-                        self.inc_r(&r(y));
+                        self.inc_r(&r(y), memory);
                     }
                 }
 
                 5 => {
                     if y == 6 {
-                        let val = self.memory.read(self.registers.hl());
+                        let val = memory.read(self.registers.hl());
                         let new_val = val.wrapping_sub(1);
-                        self.memory.write(self.registers.hl(), new_val);
+                        memory.write(self.registers.hl(), new_val);
                     } else {
-                        self.dec_r(&r(y));
+                        self.dec_r(&r(y), memory);
                     }
                 }
 
                 6 => {
-                    let n = self.fetch();
+                    let n = self.fetch(memory);
                     if y == 6 {
-                        self.memory.write(self.registers.hl(), n);
+                        memory.write(self.registers.hl(), n);
                     } else {
                         self.registers.set_r(&r(y), n);
                     }
@@ -150,35 +143,35 @@ impl Cpu {
             },
             "01yyyzzz" => {
                 if y == 6 && z == 6 {
-                    self.halt();
+                    self.halt(memory);
                 } else if y != 6 && z == 6 {
-                    self.ld_r_hl(&r(y));
+                    self.ld_r_hl(&r(y), memory);
                 } else if y == 6 && z != 6 {
-                    self.ld_hl_r(&r(z));
+                    self.ld_hl_r(&r(z), memory);
                 } else {
                     self.ld_r_r(&r(y), &r(z));
                 }
             }
-            "10yyyzzz" => self.alu_op_r(&alu(y), &r(z)),
+            "10yyyzzz" => self.alu_op_r(&alu(y), &r(z), memory),
             "11yyyzzz" => match z {
                 0 => match y {
                     0..=3 => {
-                        self.ret(&cc(y));
+                        self.ret(&cc(y), memory);
                     }
                     4 => {
-                        let n = self.fetch();
-                        self.ld_addr_r(0xFF00 + u16::from(n), &Register::A);
+                        let n = self.fetch(memory);
+                        self.ld_addr_r(0xFF00 + u16::from(n), &Register::A, memory);
                     }
                     5 => {
-                        let d = self.fetch().cast_signed();
+                        let d = self.fetch(memory).cast_signed();
                         self.add_sp_d(d);
                     }
                     6 => {
-                        let n = self.fetch();
-                        self.ld_r_addr(&Register::A, 0xFF00 + u16::from(n));
+                        let n = self.fetch(memory);
+                        self.ld_r_addr(&Register::A, 0xFF00 + u16::from(n), memory);
                     }
                     7 => {
-                        let d = self.fetch().cast_signed();
+                        let d = self.fetch(memory).cast_signed();
                         self.ld_hl_sp_d(d);
                     }
                     _ => unreachable!(),
@@ -188,14 +181,14 @@ impl Cpu {
                     let p = y >> 1;
 
                     if q == 0 {
-                        self.pop_rp2(&rp2(p));
+                        self.pop_rp2(&rp2(p), memory);
                     } else {
                         match p {
                             0 => {
-                                self.ret(&Condition::None);
+                                self.ret(&Condition::None, memory);
                             }
                             1 => {
-                                self.reti();
+                                self.reti(memory);
                             }
                             2 => {
                                 let nn = self.registers.hl();
@@ -211,30 +204,30 @@ impl Cpu {
                 }
                 2 => match y {
                     0..=3 => {
-                        let nn = self.fetch_u16();
+                        let nn = self.fetch_u16(memory);
                         self.jp(&cc(y), nn);
                     }
                     4 => {
                         let addr = 0xFF00 + u16::from(self.registers.c);
-                        self.ld_addr_r(addr, &Register::A);
+                        self.ld_addr_r(addr, &Register::A, memory);
                     }
                     5 => {
-                        let nn = self.fetch_u16();
-                        self.ld_nn_r(nn, &Register::A);
+                        let nn = self.fetch_u16(memory);
+                        self.ld_nn_r(nn, &Register::A, memory);
                     }
                     6 => {
                         let addr = 0xFF00 + u16::from(self.registers.c);
-                        self.ld_r_addr(&Register::A, addr);
+                        self.ld_r_addr(&Register::A, addr, memory);
                     }
                     7 => {
-                        let nn = self.fetch_u16();
-                        self.ld_r_nn(&Register::A, nn);
+                        let nn = self.fetch_u16(memory);
+                        self.ld_r_nn(&Register::A, nn, memory);
                     }
                     _ => unreachable!(),
                 },
                 3 => match y {
                     0 => {
-                        let nn = self.fetch_u16();
+                        let nn = self.fetch_u16(memory);
                         self.jp(&Condition::None, nn);
                     }
                     1 => unimplemented!(),
@@ -244,8 +237,8 @@ impl Cpu {
                 },
                 4 => match y {
                     0..=3 => {
-                        let nn = self.fetch_u16();
-                        self.call(&cc(y), nn);
+                        let nn = self.fetch_u16(memory);
+                        self.call(&cc(y), nn, memory);
                     }
                     _ => unreachable!(),
                 },
@@ -254,22 +247,22 @@ impl Cpu {
                     let p = y >> 1;
 
                     if q == 0 {
-                        self.push_rp2(&rp2(p));
+                        self.push_rp2(&rp2(p), memory);
                     } else {
                         match p {
                             0 => {
-                                let nn = self.fetch_u16();
-                                self.call(&Condition::None, nn);
+                                let nn = self.fetch_u16(memory);
+                                self.call(&Condition::None, nn, memory);
                             }
                             _ => unreachable!(),
                         }
                     }
                 }
                 6 => {
-                    let n = self.fetch();
+                    let n = self.fetch(memory);
                     self.alu_op_n(&alu(y), n);
                 }
-                7 => self.rst(y),
+                7 => self.rst(y, memory),
                 _ => unreachable!(),
             },
 
@@ -278,14 +271,14 @@ impl Cpu {
     }
 
     #[bitmatch]
-    fn decode_cb(&mut self, n: u8) {
+    fn decode_cb(&mut self, n: u8, memory: &mut Memory) {
         #[bitmatch]
         match n {
             "xxyyyzzz" => match x {
-                0 => self.rot_table(&rot(y, z)),
-                1 => self.bit(y, &r(z)),
-                2 => self.res(y, &r(z)),
-                3 => self.set(y, &r(z)),
+                0 => self.rot_table(&rot(y, z), memory),
+                1 => self.bit(y, &r(z), memory),
+                2 => self.res(y, &r(z), memory),
+                3 => self.set(y, &r(z), memory),
                 _ => unreachable!(),
             },
             _ => unreachable!(),
